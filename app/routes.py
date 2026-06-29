@@ -1,3 +1,4 @@
+from apscheduler.triggers.cron import CronTrigger
 from fastapi import APIRouter, Depends, Form, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
@@ -149,6 +150,15 @@ def create_rule(
         return templates.TemplateResponse(
             "rule_form.html",
             _rule_form_context(request, admin, session, error=message, form=form),
+            status_code=400,
+        )
+
+    try:
+        CronTrigger.from_crontab(cron_expression)
+    except ValueError:
+        return templates.TemplateResponse(
+            "rule_form.html",
+            _rule_form_context(request, admin, session, error="Cron 表达式无效", form=form),
             status_code=400,
         )
 

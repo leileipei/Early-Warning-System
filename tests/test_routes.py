@@ -352,6 +352,22 @@ def test_create_rule_rejects_invalid_data_source_without_saving(monkeypatch, ses
         get_settings.cache_clear()
 
 
+def test_create_rule_rejects_invalid_cron_without_saving(monkeypatch, session):
+    data_source = _create_data_source(session)
+    form_data = _valid_rule_form(data_source.id)
+    form_data["cron_expression"] = "not a cron"
+    client, get_settings, app = _client_with_admin(monkeypatch, session)
+    try:
+        response = client.post("/rules", data=form_data)
+
+        assert response.status_code == 400
+        assert "Cron 表达式无效" in response.text
+        assert session.exec(select(AlertRule)).all() == []
+    finally:
+        app.dependency_overrides.clear()
+        get_settings.cache_clear()
+
+
 def test_settings_page_lists_data_sources_and_smtp_configs(monkeypatch, session):
     _create_data_source(session)
     session.add(
