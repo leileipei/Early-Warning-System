@@ -181,6 +181,7 @@ target-version = "py311"
 # app/settings.py
 from functools import lru_cache
 
+from pydantic import ValidationInfo, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -191,6 +192,15 @@ class Settings(BaseSettings):
     database_url: str = "sqlite:///./early_warning.sqlite3"
     session_secret: str
     secret_key: str
+
+    @field_validator("session_secret", "secret_key")
+    @classmethod
+    def validate_required_secret(cls, value: str, info: ValidationInfo) -> str:
+        if not value.strip():
+            raise ValueError(f"{info.field_name} must not be empty")
+        if value.startswith("REPLACE_ME"):
+            raise ValueError(f"{info.field_name} must not use a REPLACE_ME placeholder")
+        return value
 
 
 @lru_cache
@@ -224,6 +234,9 @@ DATABASE_URL=sqlite:///./early_warning.sqlite3
 SESSION_SECRET=REPLACE_ME_WITH_RANDOM_SESSION_SECRET
 SECRET_KEY=REPLACE_ME_WITH_32_BYTE_URL_SAFE_FERNET_KEY
 ```
+
+`SESSION_SECRET` 和 `SECRET_KEY` 启动时必填，且不能保留 `.env.example` 中
+以 `REPLACE_ME` 开头的占位值。
 
 Create `README.md` with:
 

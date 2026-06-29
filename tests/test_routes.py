@@ -1,6 +1,8 @@
 import importlib
 
+import pytest
 from fastapi.testclient import TestClient
+from pydantic import ValidationError
 
 
 def _set_required_settings(monkeypatch):
@@ -42,6 +44,49 @@ def test_app_title_uses_configured_app_name(monkeypatch):
         assert app.title == "测试预警系统"
     finally:
         get_settings.cache_clear()
+
+
+def test_settings_require_secret_values(tmp_path, monkeypatch):
+    monkeypatch.delenv("SESSION_SECRET", raising=False)
+    monkeypatch.delenv("SECRET_KEY", raising=False)
+    monkeypatch.chdir(tmp_path)
+
+    from app.settings import Settings
+
+    with pytest.raises(ValidationError) as exc_info:
+        Settings()
+
+    error_fields = {error["loc"][0] for error in exc_info.value.errors()}
+    assert {"session_secret", "secret_key"} <= error_fields
+
+
+@pytest.mark.parametrize(
+    ("field_name", "settings_values"),
+    [
+        (
+            "session_secret",
+            {
+                "session_secret": "REPLACE_ME_WITH_RANDOM_SESSION_SECRET",
+                "secret_key": "valid-secret-key",
+            },
+        ),
+        (
+            "secret_key",
+            {
+                "session_secret": "valid-session-secret",
+                "secret_key": "REPLACE_ME_WITH_32_BYTE_URL_SAFE_FERNET_KEY",
+            },
+        ),
+    ],
+)
+def test_settings_reject_replace_me_secret_placeholders(field_name, settings_values):
+    from app.settings import Settings
+
+    with pytest.raises(ValidationError) as exc_info:
+        Settings(**settings_values)
+
+    error_fields = {error["loc"][0] for error in exc_info.value.errors()}
+    assert field_name in error_fields
 
 
 def test_settings_reads_dotenv_file(tmp_path, monkeypatch):

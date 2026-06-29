@@ -1,5 +1,6 @@
 from functools import lru_cache
 
+from pydantic import ValidationInfo, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -10,6 +11,15 @@ class Settings(BaseSettings):
     database_url: str = "sqlite:///./early_warning.sqlite3"
     session_secret: str
     secret_key: str
+
+    @field_validator("session_secret", "secret_key")
+    @classmethod
+    def validate_required_secret(cls, value: str, info: ValidationInfo) -> str:
+        if not value.strip():
+            raise ValueError(f"{info.field_name} must not be empty")
+        if value.startswith("REPLACE_ME"):
+            raise ValueError(f"{info.field_name} must not use a REPLACE_ME placeholder")
+        return value
 
 
 @lru_cache
