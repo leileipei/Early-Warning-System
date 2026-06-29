@@ -4,10 +4,12 @@ import pytest
 from fastapi.testclient import TestClient
 from pydantic import ValidationError
 
+VALID_FERNET_KEY = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+
 
 def _set_required_settings(monkeypatch):
     monkeypatch.setenv("SESSION_SECRET", "test-session-secret")
-    monkeypatch.setenv("SECRET_KEY", "test-secret-key")
+    monkeypatch.setenv("SECRET_KEY", VALID_FERNET_KEY)
 
 
 def _load_create_app():
@@ -67,7 +69,7 @@ def test_settings_require_secret_values(tmp_path, monkeypatch):
             "session_secret",
             {
                 "session_secret": "REPLACE_ME_WITH_RANDOM_SESSION_SECRET",
-                "secret_key": "valid-secret-key",
+                "secret_key": VALID_FERNET_KEY,
             },
         ),
         (
@@ -89,6 +91,16 @@ def test_settings_reject_replace_me_secret_placeholders(field_name, settings_val
     assert field_name in error_fields
 
 
+def test_settings_reject_invalid_secret_key():
+    from app.settings import Settings
+
+    with pytest.raises(ValidationError) as exc_info:
+        Settings(session_secret="valid-session-secret", secret_key="not-a-fernet-key")
+
+    error_fields = {error["loc"][0] for error in exc_info.value.errors()}
+    assert "secret_key" in error_fields
+
+
 def test_settings_reads_dotenv_file(tmp_path, monkeypatch):
     monkeypatch.delenv("APP_NAME", raising=False)
     monkeypatch.delenv("SESSION_SECRET", raising=False)
@@ -99,7 +111,7 @@ def test_settings_reads_dotenv_file(tmp_path, monkeypatch):
             [
                 "APP_NAME=Env 文件预警系统",
                 "SESSION_SECRET=dotenv-session-secret",
-                "SECRET_KEY=dotenv-secret-key",
+                f"SECRET_KEY={VALID_FERNET_KEY}",
             ]
         ),
         encoding="utf-8",
@@ -113,6 +125,6 @@ def test_settings_reads_dotenv_file(tmp_path, monkeypatch):
 
         assert settings.app_name == "Env 文件预警系统"
         assert settings.session_secret == "dotenv-session-secret"
-        assert settings.secret_key == "dotenv-secret-key"
+        assert settings.secret_key == VALID_FERNET_KEY
     finally:
         get_settings.cache_clear()

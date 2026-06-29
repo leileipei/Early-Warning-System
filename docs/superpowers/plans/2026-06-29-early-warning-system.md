@@ -600,16 +600,22 @@ git commit -m "feat: add persistence models"
 ## Task 3: Security, Encryption, And Admin Login
 
 **Files:**
+- Modify: `.env.example`
+- Modify: `README.md`
+- Modify: `app/settings.py`
 - Create: `app/security.py`
 - Create: `app/crypto.py`
 - Create: `app/auth.py`
 - Modify: `app/main.py`
 - Create: `tests/test_auth.py`
+- Modify: `tests/test_routes.py`
 
 - [ ] **Step 1: Write failing tests**
 
 ```python
 # tests/test_auth.py
+from cryptography.fernet import Fernet
+
 from app.crypto import SecretCipher
 from app.security import hash_password, verify_password
 
@@ -623,13 +629,24 @@ def test_password_hash_round_trip():
 
 
 def test_secret_cipher_round_trip():
-    cipher = SecretCipher.from_key_material("0123456789abcdef0123456789abcdef")
+    cipher = SecretCipher.from_key_material(Fernet.generate_key().decode())
 
     encrypted = cipher.encrypt("smtp-password")
 
     assert encrypted != "smtp-password"
     assert cipher.decrypt(encrypted) == "smtp-password"
 ```
+
+Also add route-level tests using `TestClient`, an in-memory SQLite engine, and
+`app.dependency_overrides[get_session]`:
+
+- successful `POST /login` returns `303` to `/` and can access a temporary protected route;
+- wrong password returns `400`;
+- `POST /logout` clears the session and returns `303` to `/login`;
+- `require_admin` returns `401` when the session user id no longer exists in the database.
+
+Update settings tests so every `SECRET_KEY` value is a valid Fernet key, and add a
+test proving invalid Fernet keys are rejected.
 
 - [ ] **Step 2: Run tests to verify failure**
 
@@ -658,9 +675,6 @@ def verify_password(password: str, password_hash: str) -> bool:
 
 ```python
 # app/crypto.py
-import base64
-import hashlib
-
 from cryptography.fernet import Fernet
 
 
@@ -670,9 +684,7 @@ class SecretCipher:
 
     @classmethod
     def from_key_material(cls, key_material: str) -> "SecretCipher":
-        digest = hashlib.sha256(key_material.encode("utf-8")).digest()
-        key = base64.urlsafe_b64encode(digest)
-        return cls(Fernet(key))
+        return cls(Fernet(key_material.encode("utf-8")))
 
     def encrypt(self, value: str) -> str:
         return self._fernet.encrypt(value.encode("utf-8")).decode("utf-8")
@@ -680,6 +692,15 @@ class SecretCipher:
     def decrypt(self, encrypted_value: str) -> str:
         return self._fernet.decrypt(encrypted_value.encode("utf-8")).decode("utf-8")
 ```
+
+`SECRET_KEY` is a Fernet key, generated with:
+
+```bash
+python3 -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+```
+
+Update `app/settings.py` so `secret_key` remains required, rejects `REPLACE_ME`,
+and is validated by constructing `Fernet(secret_key.encode("utf-8"))`.
 
 - [ ] **Step 5: Add auth route skeleton**
 
@@ -696,11 +717,17 @@ from app.security import verify_password
 router = APIRouter()
 
 
-def require_admin(request: Request) -> str:
-    username = request.session.get("admin_username")
-    if not username:
+def require_admin(
+    request: Request,
+    session: Session = Depends(get_session),
+) -> AdminUser:
+    admin_user_id = request.session.get("admin_user_id")
+    if admin_user_id is None:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED)
-    return username
+    user = session.get(AdminUser, int(admin_user_id))
+    if not user:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED)
+    return user
 
 
 @router.post("/login")
@@ -713,7 +740,8 @@ def login(
     user = session.exec(select(AdminUser).where(AdminUser.username == username)).first()
     if not user or not verify_password(password, user.password_hash):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="用户名或密码错误")
-    request.session["admin_username"] = user.username
+    request.session.clear()
+    request.session["admin_user_id"] = user.id
     return RedirectResponse("/", status_code=status.HTTP_303_SEE_OTHER)
 
 
@@ -758,7 +786,7 @@ Expected: pass.
 - [ ] **Step 7: Commit**
 
 ```bash
-git add app/security.py app/crypto.py app/auth.py app/main.py tests/test_auth.py
+git add .env.example README.md app/settings.py app/security.py app/crypto.py app/auth.py app/main.py tests/test_auth.py tests/test_routes.py docs/superpowers/plans/2026-06-29-early-warning-system.md
 git commit -m "feat: add admin security primitives"
 ```
 

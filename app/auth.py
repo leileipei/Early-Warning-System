@@ -9,11 +9,21 @@ from app.security import verify_password
 router = APIRouter()
 
 
-def require_admin(request: Request) -> str:
-    username = request.session.get("admin_username")
-    if not username:
+def require_admin(
+    request: Request,
+    session: Session = Depends(get_session),
+) -> AdminUser:
+    admin_user_id = request.session.get("admin_user_id")
+    if admin_user_id is None:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED)
-    return username
+    try:
+        user_id = int(admin_user_id)
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED) from exc
+    user = session.get(AdminUser, user_id)
+    if not user:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED)
+    return user
 
 
 @router.post("/login")
@@ -26,7 +36,8 @@ def login(
     user = session.exec(select(AdminUser).where(AdminUser.username == username)).first()
     if not user or not verify_password(password, user.password_hash):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="用户名或密码错误")
-    request.session["admin_username"] = user.username
+    request.session.clear()
+    request.session["admin_user_id"] = user.id
     return RedirectResponse("/", status_code=status.HTTP_303_SEE_OTHER)
 
 

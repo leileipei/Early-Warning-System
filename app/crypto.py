@@ -1,6 +1,3 @@
-import base64
-import hashlib
-
 from cryptography.fernet import Fernet
 
 
@@ -10,9 +7,7 @@ class SecretCipher:
 
     @classmethod
     def from_key_material(cls, key_material: str) -> "SecretCipher":
-        digest = hashlib.sha256(key_material.encode("utf-8")).digest()
-        key = base64.urlsafe_b64encode(digest)
-        return cls(Fernet(key))
+        return cls(Fernet(key_material.encode("utf-8")))
 
     def encrypt(self, value: str) -> str:
         return self._fernet.encrypt(value.encode("utf-8")).decode("utf-8")

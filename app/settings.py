@@ -1,5 +1,6 @@
 from functools import lru_cache
 
+from cryptography.fernet import Fernet
 from pydantic import ValidationInfo, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -19,6 +20,11 @@ class Settings(BaseSettings):
             raise ValueError(f"{info.field_name} must not be empty")
         if value.startswith("REPLACE_ME"):
             raise ValueError(f"{info.field_name} must not use a REPLACE_ME placeholder")
+        if info.field_name == "secret_key":
+            try:
+                Fernet(value.encode("utf-8"))
+            except (TypeError, ValueError) as exc:
+                raise ValueError("secret_key must be a valid Fernet key") from exc
         return value
 
 
