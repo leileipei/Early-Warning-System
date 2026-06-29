@@ -9,14 +9,19 @@ python -m venv .venv
 source .venv/bin/activate
 cp .env.example .env
 pip install -e ".[dev]"
-python -c "from app.db import init_db; init_db()"
-python -m app.admin_cli admin
 ```
 
-启动前必须替换 `.env` 中的 `SESSION_SECRET` 和 `SECRET_KEY`，否则应用不会正常启动。`SECRET_KEY` 必须是有效的 Fernet key，可用以下命令生成：
+继续之前，必须先替换 `.env` 中的 `SESSION_SECRET` 和 `SECRET_KEY`，否则应用不会正常启动。`SECRET_KEY` 必须是有效的 Fernet key，可用以下命令生成：
 
 ```bash
 python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+```
+
+替换完成后初始化数据库并创建首个管理员：
+
+```bash
+python -c "from app.db import init_db; init_db()"
+python -m app.admin_cli admin
 ```
 
 ## 启动 Web

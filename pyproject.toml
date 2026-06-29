@@ -4,7 +4,7 @@ version = "0.1.0"
 requires-python = ">=3.11"
 dependencies = [
   "apscheduler>=3.10",
-  "bcrypt<5",
+  "bcrypt<4",
   "cryptography>=42",
   "fastapi>=0.110",
   "itsdangerous>=2.2",
