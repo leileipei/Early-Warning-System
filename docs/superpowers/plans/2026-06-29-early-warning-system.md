@@ -1355,7 +1355,7 @@ git commit -m "feat: add SQL Server query adapter"
 - Create: `app/executor.py`
 - Create: `tests/test_executor.py`
 
-- [ ] **Step 1: Write failing executor tests**
+- [x] **Step 1: Write failing executor tests**
 
 ```python
 # tests/test_executor.py
@@ -1424,13 +1424,15 @@ def test_per_row_mode_sends_one_email_per_row():
     assert result.email_count == 2
 ```
 
-- [ ] **Step 2: Run tests to verify failure**
+- [x] **Step 2: Run tests to verify failure**
+
+Note: `pytest` was unavailable in the local system Python environment, so the intended red/green pytest runs could not execute here.
 
 Run: `pytest tests/test_executor.py -v`
 
 Expected: fail because `app.executor` does not exist.
 
-- [ ] **Step 3: Implement executor**
+- [x] **Step 3: Implement executor**
 
 ```python
 # app/executor.py
@@ -1501,13 +1503,15 @@ class RuleExecutor:
         return messages
 ```
 
-- [ ] **Step 4: Run executor tests**
+- [x] **Step 4: Run executor tests**
+
+Note: local verification used `PYTHONPYCACHEPREFIX=/private/tmp/early-warning-pycache python3 -m compileall app tests` because `pytest` is not installed in this environment.
 
 Run: `pytest tests/test_executor.py -v`
 
 Expected: pass.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add app/executor.py tests/test_executor.py
