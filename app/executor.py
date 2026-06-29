@@ -90,12 +90,14 @@ class RuleExecutor:
         mail_results = [self._send_message(message) for message in messages]
         successful_count = sum(1 for mail_result in mail_results if mail_result.result.success)
         status = self._status_for_mail_results(mail_results)
-        error_message = self._combined_error_message(mail_results)
+        has_failure = successful_count < len(mail_results)
+        error_message = self._combined_error_message(mail_results) if has_failure else None
 
         return ExecutionResult(
             status=status,
             row_count=len(rows),
             mail_count=successful_count,
+            error_type="MailSendError" if has_failure else "",
             error_message=error_message,
             mail_results=mail_results,
         )
@@ -153,7 +155,7 @@ class RuleExecutor:
             for mail_result in mail_results
             if not mail_result.result.success and mail_result.result.error_message
         ]
-        return "; ".join(errors) if errors else None
+        return "; ".join(errors) if errors else "one or more emails failed"
 
 
 def _parse_recipients(value: str) -> list[str]:

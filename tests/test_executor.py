@@ -197,6 +197,8 @@ def test_all_mail_failures_fail():
     assert result.status == ExecutionStatus.FAILED
     assert result.row_count == 2
     assert result.mail_count == 0
+    assert result.error_type == "MailSendError"
+    assert result.error_message == "one or more emails failed"
     assert len(result.mail_results) == 2
     assert all(not mail_result.result.success for mail_result in result.mail_results)
 
@@ -213,6 +215,8 @@ def test_partial_mail_failures_are_partial_failed():
     assert result.status == ExecutionStatus.PARTIAL_FAILED
     assert result.row_count == 2
     assert result.mail_count == 1
+    assert result.error_type == "MailSendError"
+    assert result.error_message == "one or more emails failed"
     assert [mail_result.result.success for mail_result in result.mail_results] == [True, False]
 
 
