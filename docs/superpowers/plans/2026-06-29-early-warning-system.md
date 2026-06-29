@@ -1177,12 +1177,32 @@ class SmtpMailer:
         mime.set_content("HTML 邮件需要使用支持 HTML 的客户端查看。")
         mime.add_alternative(message.html_body, subtype="html")
         all_recipients = message.recipients + message.cc_recipients
+        client = None
         try:
             client = self.client_factory()
             client.sendmail(self.sender, all_recipients, mime.as_string())
             return MailSendResult(success=True)
         except Exception as exc:
             return MailSendResult(success=False, error_message=str(exc))
+        finally:
+            if client is not None:
+                self._close_client(client)
+
+    def _close_client(self, client) -> None:
+        quit_method = getattr(client, "quit", None)
+        if callable(quit_method):
+            try:
+                quit_method()
+                return
+            except Exception:
+                pass
+
+        close_method = getattr(client, "close", None)
+        if callable(close_method):
+            try:
+                close_method()
+            except Exception:
+                pass
 ```
 
 - [ ] **Step 4: Run tests**
