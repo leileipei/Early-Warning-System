@@ -8,6 +8,10 @@
   </div>
 </section>
 
+{% if error %}
+<p class="form-error">{{ error }}</p>
+{% endif %}
+
 <section class="two-column">
   <article class="panel">
     <h2>SQL Server</h2>

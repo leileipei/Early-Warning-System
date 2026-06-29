@@ -51,6 +51,25 @@ def _rule_form_context(
     }
 
 
+def _settings_context(
+    request: Request,
+    admin: AdminUser,
+    session: Session,
+    *,
+    error: str = "",
+) -> dict:
+    data_sources = session.exec(select(SqlDataSource).order_by(SqlDataSource.created_at.desc())).all()
+    smtp_configs = session.exec(select(SmtpConfig).order_by(SmtpConfig.updated_at.desc())).all()
+    return {
+        "request": request,
+        "admin": admin,
+        "title": "系统配置",
+        "data_sources": data_sources,
+        "smtp_configs": smtp_configs,
+        "error": error,
+    }
+
+
 @router.get("/login", response_class=HTMLResponse)
 def login_page(request: Request):
     return templates.TemplateResponse("login.html", {"request": request, "title": "登录"})
@@ -123,6 +142,17 @@ def create_rule(
     }
 
     try:
+        validate_select_only_sql(sql_text)
+        parsed_send_mode = SendMode(send_mode)
+    except (SqlValidationError, ValueError) as exc:
+        message = str(exc) or "表单数据无效"
+        return templates.TemplateResponse(
+            "rule_form.html",
+            _rule_form_context(request, admin, session, error=message, form=form),
+            status_code=400,
+        )
+
+    try:
         source_id = int(data_source_id)
     except ValueError:
         return templates.TemplateResponse(
@@ -135,17 +165,6 @@ def create_rule(
         return templates.TemplateResponse(
             "rule_form.html",
             _rule_form_context(request, admin, session, error="请选择有效的数据源", form=form),
-            status_code=400,
-        )
-
-    try:
-        validate_select_only_sql(sql_text)
-        parsed_send_mode = SendMode(send_mode)
-    except (SqlValidationError, ValueError) as exc:
-        message = str(exc) or "表单数据无效"
-        return templates.TemplateResponse(
-            "rule_form.html",
-            _rule_form_context(request, admin, session, error=message, form=form),
             status_code=400,
         )
 
@@ -174,22 +193,15 @@ def settings_page(
     admin: AdminUser = Depends(require_admin),
     session: Session = Depends(get_session),
 ):
-    data_sources = session.exec(select(SqlDataSource).order_by(SqlDataSource.created_at.desc())).all()
-    smtp_configs = session.exec(select(SmtpConfig).order_by(SmtpConfig.updated_at.desc())).all()
     return templates.TemplateResponse(
         "settings.html",
-        {
-            "request": request,
-            "admin": admin,
-            "title": "系统配置",
-            "data_sources": data_sources,
-            "smtp_configs": smtp_configs,
-        },
+        _settings_context(request, admin, session),
     )
 
 
 @router.post("/settings/sql-server")
 def create_sql_server_settings(
+    request: Request,
     name: str = Form(""),
     host: str = Form(""),
     port: int = Form(1433),
@@ -202,6 +214,14 @@ def create_sql_server_settings(
     session: Session = Depends(get_session),
 ):
     _ = admin
+    existing = session.exec(select(SqlDataSource).where(SqlDataSource.name == name)).first()
+    if existing is not None:
+        return templates.TemplateResponse(
+            "settings.html",
+            _settings_context(request, admin, session, error="数据源名称已存在"),
+            status_code=400,
+        )
+
     data_source = SqlDataSource(
         name=name,
         host=host,

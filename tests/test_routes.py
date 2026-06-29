@@ -5,7 +5,17 @@ from fastapi.testclient import TestClient
 from pydantic import ValidationError
 from sqlmodel import select
 
-from app.models import AdminUser, AlertRule, SmtpConfig, SqlDataSource
+from app.models import (
+    AdminUser,
+    AlertRule,
+    ExecutionLog,
+    MailLog,
+    MailStatus,
+    SendMode,
+    SmtpConfig,
+    SqlDataSource,
+    TriggerType,
+)
 
 VALID_FERNET_KEY = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
 
@@ -255,6 +265,48 @@ def test_create_rule_persists_alert_rule(monkeypatch, session):
         get_settings.cache_clear()
 
 
+def test_rules_page_lists_existing_rules(monkeypatch, session):
+    data_source = _create_data_source(session)
+    session.add(
+        AlertRule(
+            name="库存预警",
+            data_source_id=data_source.id,
+            sql_text="select id from stock",
+            cron_expression="0 8 * * *",
+            recipients="ops@example.com",
+            subject_template="库存预警",
+            body_template="{{table}}",
+            send_mode=SendMode.SUMMARY,
+            enabled=True,
+        )
+    )
+    session.commit()
+    client, get_settings, app = _client_with_admin(monkeypatch, session)
+    try:
+        response = client.get("/rules")
+
+        assert response.status_code == 200
+        assert "库存预警" in response.text
+        assert "0 8 * * *" in response.text
+    finally:
+        app.dependency_overrides.clear()
+        get_settings.cache_clear()
+
+
+def test_new_rule_page_lists_data_sources(monkeypatch, session):
+    _create_data_source(session)
+    client, get_settings, app = _client_with_admin(monkeypatch, session)
+    try:
+        response = client.get("/rules/new")
+
+        assert response.status_code == 200
+        assert "生产库" in response.text
+        assert "data_source_id" in response.text
+    finally:
+        app.dependency_overrides.clear()
+        get_settings.cache_clear()
+
+
 def test_create_rule_rejects_non_select_sql_without_saving(monkeypatch, session):
     data_source = _create_data_source(session)
     form_data = _valid_rule_form(data_source.id)
@@ -271,6 +323,22 @@ def test_create_rule_rejects_non_select_sql_without_saving(monkeypatch, session)
         get_settings.cache_clear()
 
 
+def test_create_rule_validates_sql_before_data_source(monkeypatch, session):
+    form_data = _valid_rule_form(999)
+    form_data["sql_text"] = "delete from orders"
+    client, get_settings, app = _client_with_admin(monkeypatch, session)
+    try:
+        response = client.post("/rules", data=form_data)
+
+        assert response.status_code == 400
+        assert "只允许 SELECT 查询" in response.text
+        assert "请选择有效的数据源" not in response.text
+        assert session.exec(select(AlertRule)).all() == []
+    finally:
+        app.dependency_overrides.clear()
+        get_settings.cache_clear()
+
+
 def test_create_rule_rejects_invalid_data_source_without_saving(monkeypatch, session):
     client, get_settings, app = _client_with_admin(monkeypatch, session)
     try:
@@ -279,6 +347,32 @@ def test_create_rule_rejects_invalid_data_source_without_saving(monkeypatch, ses
         assert response.status_code == 400
         assert "请选择有效的数据源" in response.text
         assert session.exec(select(AlertRule)).all() == []
+    finally:
+        app.dependency_overrides.clear()
+        get_settings.cache_clear()
+
+
+def test_settings_page_lists_data_sources_and_smtp_configs(monkeypatch, session):
+    _create_data_source(session)
+    session.add(
+        SmtpConfig(
+            host="smtp.example.com",
+            port=587,
+            username="mailer",
+            encrypted_password="encrypted",
+            sender="alerts@example.com",
+            enabled=True,
+        )
+    )
+    session.commit()
+    client, get_settings, app = _client_with_admin(monkeypatch, session)
+    try:
+        response = client.get("/settings")
+
+        assert response.status_code == 200
+        assert "生产库" in response.text
+        assert "smtp.example.com" in response.text
+        assert "encrypted" not in response.text
     finally:
         app.dependency_overrides.clear()
         get_settings.cache_clear()
@@ -323,6 +417,32 @@ def test_create_sql_server_settings_encrypts_password(monkeypatch, session):
         get_settings.cache_clear()
 
 
+def test_create_sql_server_settings_rejects_duplicate_name(monkeypatch, session):
+    _create_data_source(session)
+    client, get_settings, app = _client_with_admin(monkeypatch, session)
+    try:
+        response = client.post(
+            "/settings/sql-server",
+            data={
+                "name": "生产库",
+                "host": "other.example.com",
+                "port": "1433",
+                "database": "erp2",
+                "username": "readonly",
+                "password": "plain-password",
+                "enabled": "on",
+                "connect_timeout_seconds": "15",
+            },
+        )
+
+        assert response.status_code == 400
+        assert "数据源名称已存在" in response.text
+        assert len(session.exec(select(SqlDataSource)).all()) == 1
+    finally:
+        app.dependency_overrides.clear()
+        get_settings.cache_clear()
+
+
 def test_create_smtp_settings_encrypts_password(monkeypatch, session):
     client, get_settings, app = _client_with_admin(monkeypatch, session)
     try:
@@ -345,6 +465,53 @@ def test_create_smtp_settings_encrypts_password(monkeypatch, session):
         assert smtp_config.encrypted_password != "smtp-password"
         assert smtp_config.use_tls is True
         assert smtp_config.use_ssl is False
+    finally:
+        app.dependency_overrides.clear()
+        get_settings.cache_clear()
+
+
+def test_logs_page_lists_execution_and_mail_logs(monkeypatch, session):
+    data_source = _create_data_source(session)
+    rule = AlertRule(
+        name="日志规则",
+        data_source_id=data_source.id,
+        sql_text="select id from orders",
+        cron_expression="0 9 * * *",
+        recipients="ops@example.com",
+        subject_template="大额订单预警",
+        body_template="{{table}}",
+        send_mode=SendMode.SUMMARY,
+        enabled=True,
+    )
+    session.add(rule)
+    session.commit()
+    session.refresh(rule)
+    execution_log = ExecutionLog(
+        rule_id=rule.id,
+        trigger_type=TriggerType.MANUAL,
+        row_count=2,
+        email_count=1,
+    )
+    session.add(execution_log)
+    session.commit()
+    session.refresh(execution_log)
+    session.add(
+        MailLog(
+            execution_log_id=execution_log.id,
+            recipients="ops@example.com",
+            subject="大额订单预警",
+            status=MailStatus.SUCCESS,
+        )
+    )
+    session.commit()
+    client, get_settings, app = _client_with_admin(monkeypatch, session)
+    try:
+        response = client.get("/logs")
+
+        assert response.status_code == 200
+        assert "大额订单预警" in response.text
+        assert "ops@example.com" in response.text
+        assert "manual" in response.text
     finally:
         app.dependency_overrides.clear()
         get_settings.cache_clear()
