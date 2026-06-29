@@ -62,13 +62,14 @@ def make_rule(send_mode=SendMode.SUMMARY, **overrides):
 def test_summary_mode_sends_one_email_with_all_rows():
     mailer = FakeMailer()
     sql_client = FakeSqlClient([{"id": 1, "amount": 100}, {"id": 2, "amount": 200}])
-    executor = RuleExecutor(sql_client=sql_client, mailer=mailer, max_rows=25)
+    executor = RuleExecutor(sql_client=sql_client, mailer=mailer)
 
-    result = executor.execute(make_rule())
+    result = executor.execute(make_rule(max_rows=25))
 
     assert result.status == ExecutionStatus.SUCCESS
     assert result.row_count == 2
     assert result.mail_count == 1
+    assert result.email_count == 1
     assert len(mailer.messages) == 1
     assert sql_client.calls == [
         {
@@ -142,8 +143,20 @@ def test_sql_client_exception_fails():
     assert result.status == ExecutionStatus.FAILED
     assert result.row_count == 0
     assert result.mail_count == 0
+    assert result.error_type == "RuntimeError"
     assert result.error_message == "query timed out"
     assert mailer.messages == []
+
+
+def test_exception_without_message_records_error_type_as_message():
+    mailer = FakeMailer()
+    executor = RuleExecutor(sql_client=FakeSqlClient(error=RuntimeError()), mailer=mailer)
+
+    result = executor.execute(make_rule())
+
+    assert result.status == ExecutionStatus.FAILED
+    assert result.error_type == "RuntimeError"
+    assert result.error_message == "RuntimeError"
 
 
 def test_template_error_fails_without_sending_email():

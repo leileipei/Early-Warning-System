@@ -29,8 +29,13 @@ class ExecutionResult:
     status: ExecutionStatus
     row_count: int = 0
     mail_count: int = 0
+    error_type: str = ""
     error_message: str | None = None
     mail_results: list[ExecutionMailResult] = field(default_factory=list)
+
+    @property
+    def email_count(self) -> int:
+        return self.mail_count
 
 
 class RuleExecutor:
@@ -49,16 +54,24 @@ class RuleExecutor:
         try:
             validate_select_only_sql(sql)
         except Exception as exc:
-            return ExecutionResult(status=ExecutionStatus.FAILED, error_message=str(exc))
+            return ExecutionResult(
+                status=ExecutionStatus.FAILED,
+                error_type=type(exc).__name__,
+                error_message=_exception_message(exc),
+            )
 
         try:
             query_result = self.sql_client.query(
                 sql,
                 timeout_seconds=rule.query_timeout_seconds,
-                max_rows=self.max_rows,
+                max_rows=_rule_max_rows(rule, self.max_rows),
             )
         except Exception as exc:
-            return ExecutionResult(status=ExecutionStatus.FAILED, error_message=str(exc))
+            return ExecutionResult(
+                status=ExecutionStatus.FAILED,
+                error_type=type(exc).__name__,
+                error_message=_exception_message(exc),
+            )
 
         rows = query_result.rows
         if not rows:
@@ -70,7 +83,8 @@ class RuleExecutor:
             return ExecutionResult(
                 status=ExecutionStatus.FAILED,
                 row_count=len(rows),
-                error_message=str(exc),
+                error_type=type(exc).__name__,
+                error_message=_exception_message(exc),
             )
 
         mail_results = [self._send_message(message) for message in messages]
@@ -122,7 +136,7 @@ class RuleExecutor:
         try:
             result = self.mailer.send(message)
         except Exception as exc:
-            result = MailSendResult(success=False, error_message=str(exc))
+            result = MailSendResult(success=False, error_message=_exception_message(exc))
         return ExecutionMailResult(message=message, result=result)
 
     def _status_for_mail_results(self, mail_results: list[ExecutionMailResult]) -> ExecutionStatus:
@@ -148,3 +162,11 @@ def _parse_recipients(value: str) -> list[str]:
 
 def _rule_sql(rule: AlertRule) -> str:
     return getattr(rule, "sql_query", rule.sql_text)
+
+
+def _rule_max_rows(rule: AlertRule, fallback: int) -> int:
+    return getattr(rule, "max_rows", fallback)
+
+
+def _exception_message(exc: Exception) -> str:
+    return str(exc) or type(exc).__name__
