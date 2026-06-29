@@ -1525,7 +1525,7 @@ git commit -m "feat: execute warning rules"
 - Create: `app/worker.py`
 - Create: `tests/test_scheduler.py`
 
-- [ ] **Step 1: Write failing scheduler test**
+- [x] **Step 1: Write failing scheduler test**
 
 ```python
 # tests/test_scheduler.py
@@ -1554,13 +1554,13 @@ def test_scheduler_adds_enabled_rule_job():
     assert jobs[0].id == "rule-7"
 ```
 
-- [ ] **Step 2: Run test to verify failure**
+- [x] **Step 2: Run test to verify failure**
 
 Run: `pytest tests/test_scheduler.py -v`
 
 Expected: fail because `app.scheduler` does not exist.
 
-- [ ] **Step 3: Implement scheduler**
+- [x] **Step 3: Implement scheduler**
 
 ```python
 # app/scheduler.py
@@ -1608,13 +1608,13 @@ if __name__ == "__main__":
     main()
 ```
 
-- [ ] **Step 4: Run scheduler test**
+- [x] **Step 4: Run scheduler test**
 
 Run: `pytest tests/test_scheduler.py -v`
 
 Expected: pass.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add app/scheduler.py app/worker.py tests/test_scheduler.py
