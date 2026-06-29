@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>{{ title or "SQL 预警系统" }} - SQL 预警系统</title>
+    <link rel="stylesheet" href="/static/styles.css">
+  </head>
+  <body>
+    <header class="topbar">
+      <a class="brand" href="/">SQL 预警系统</a>
+      <nav class="nav-links" aria-label="主导航">
+        <a href="/">仪表盘</a>
+        <a href="/rules">规则</a>
+        <a href="/settings">配置</a>
+        <a href="/logs">日志</a>
+      </nav>
+      <form class="logout-form" method="post" action="/logout">
+        <button class="button button-secondary" type="submit">退出</button>
+      </form>
+    </header>
+    <main class="page">
+      {% block content %}{% endblock %}
+    </main>
+  </body>
+</html>

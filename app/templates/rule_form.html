@@ -1,0 +1,38 @@
+{% extends "base.html" %}
+
+{% block content %}
+<section class="page-header">
+  <div>
+    <p class="eyebrow">规则</p>
+    <h1>新建规则</h1>
+  </div>
+  <a class="button button-secondary" href="/rules">返回</a>
+</section>
+
+<section class="panel">
+  <form class="stacked-form">
+    <label>
+      <span>规则名称</span>
+      <input name="name" placeholder="例如：库存低水位预警">
+    </label>
+    <label>
+      <span>SQL 查询</span>
+      <textarea name="sql" rows="8" placeholder="SELECT ..."></textarea>
+    </label>
+    <div class="form-row">
+      <label>
+        <span>Cron 表达式</span>
+        <input name="cron" placeholder="0 9 * * *">
+      </label>
+      <label>
+        <span>收件人</span>
+        <input name="recipients" placeholder="ops@example.com">
+      </label>
+    </div>
+    <div class="button-row">
+      <button class="button" type="button">保存</button>
+      <a class="button button-secondary" href="/rules">取消</a>
+    </div>
+  </form>
+</section>
+{% endblock %}

@@ -1,0 +1,41 @@
+{% extends "base.html" %}
+
+{% block content %}
+<section class="page-header">
+  <div>
+    <p class="eyebrow">系统</p>
+    <h1>配置</h1>
+  </div>
+</section>
+
+<section class="two-column">
+  <article class="panel">
+    <h2>SQL Server</h2>
+    <form class="stacked-form">
+      <label>
+        <span>主机</span>
+        <input name="sql_host">
+      </label>
+      <label>
+        <span>数据库</span>
+        <input name="sql_database">
+      </label>
+      <button class="button" type="button">保存数据源</button>
+    </form>
+  </article>
+  <article class="panel">
+    <h2>SMTP</h2>
+    <form class="stacked-form">
+      <label>
+        <span>服务器</span>
+        <input name="smtp_host">
+      </label>
+      <label>
+        <span>发件人</span>
+        <input name="smtp_from">
+      </label>
+      <button class="button" type="button">保存邮件配置</button>
+    </form>
+  </article>
+</section>
+{% endblock %}

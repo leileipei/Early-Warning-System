@@ -128,3 +128,57 @@ def test_settings_reads_dotenv_file(tmp_path, monkeypatch):
         assert settings.secret_key == VALID_FERNET_KEY
     finally:
         get_settings.cache_clear()
+
+
+def test_login_page_renders(monkeypatch):
+    _set_required_settings(monkeypatch)
+    create_app, get_settings = _load_create_app()
+    try:
+        client = TestClient(create_app())
+
+        response = client.get("/login")
+
+        assert response.status_code == 200
+        assert "用户名" in response.text
+    finally:
+        get_settings.cache_clear()
+
+
+def test_rules_page_requires_login(monkeypatch):
+    _set_required_settings(monkeypatch)
+    create_app, get_settings = _load_create_app()
+    try:
+        client = TestClient(create_app())
+
+        response = client.get("/rules")
+
+        assert response.status_code == 401
+    finally:
+        get_settings.cache_clear()
+
+
+def test_settings_page_requires_login(monkeypatch):
+    _set_required_settings(monkeypatch)
+    create_app, get_settings = _load_create_app()
+    try:
+        client = TestClient(create_app())
+
+        response = client.get("/settings")
+
+        assert response.status_code == 401
+    finally:
+        get_settings.cache_clear()
+
+
+def test_static_stylesheet_is_mounted(monkeypatch):
+    _set_required_settings(monkeypatch)
+    create_app, get_settings = _load_create_app()
+    try:
+        client = TestClient(create_app())
+
+        response = client.get("/static/styles.css")
+
+        assert response.status_code == 200
+        assert "text/css" in response.headers["content-type"]
+    finally:
+        get_settings.cache_clear()

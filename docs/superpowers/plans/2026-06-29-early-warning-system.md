@@ -1636,7 +1636,7 @@ git commit -m "feat: schedule enabled warning rules"
 - Create: `app/static/styles.css`
 - Modify: `tests/test_routes.py`
 
-- [ ] **Step 1: Extend route tests**
+- [x] **Step 1: Extend route tests**
 
 Add these tests to `tests/test_routes.py`:
 
@@ -1658,13 +1658,13 @@ def test_rules_page_requires_login():
     assert response.status_code == 401
 ```
 
-- [ ] **Step 2: Run tests to verify failure**
+- [x] **Step 2: Run tests to verify failure**
 
 Run: `pytest tests/test_routes.py -v`
 
 Expected: fail because `/login` and `/rules` are not implemented.
 
-- [ ] **Step 3: Add route module**
+- [x] **Step 3: Add route module**
 
 ```python
 # app/routes.py
@@ -1733,7 +1733,7 @@ def create_app() -> FastAPI:
 app = create_app()
 ```
 
-- [ ] **Step 4: Create templates and styles**
+- [x] **Step 4: Create templates and styles**
 
 ```html
 <!-- app/templates/base.html -->
@@ -1867,13 +1867,13 @@ button, .button {
 }
 ```
 
-- [ ] **Step 5: Run route tests**
+- [x] **Step 5: Run route tests**
 
 Run: `pytest tests/test_routes.py -v`
 
 Expected: pass.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add app/routes.py app/main.py app/templates app/static tests/test_routes.py

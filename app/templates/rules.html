@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+
+{% block content %}
+<section class="page-header">
+  <div>
+    <p class="eyebrow">预警</p>
+    <h1>规则</h1>
+  </div>
+  <a class="button" href="/rules/new">新建规则</a>
+</section>
+
+<section class="panel">
+  <div class="table-shell">
+    <table>
+      <thead>
+        <tr>
+          <th>规则名称</th>
+          <th>调度</th>
+          <th>状态</th>
+          <th>最近执行</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td colspan="4" class="empty-cell">暂无规则</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endblock %}

@@ -1,0 +1,36 @@
+{% extends "base.html" %}
+
+{% block content %}
+<section class="page-header">
+  <div>
+    <p class="eyebrow">后台</p>
+    <h1>仪表盘</h1>
+  </div>
+</section>
+
+<section class="metric-grid" aria-label="运行概览">
+  <article class="panel metric-card">
+    <span class="metric-label">启用规则</span>
+    <strong>0</strong>
+  </article>
+  <article class="panel metric-card">
+    <span class="metric-label">今日执行</span>
+    <strong>0</strong>
+  </article>
+  <article class="panel metric-card">
+    <span class="metric-label">待处理告警</span>
+    <strong>0</strong>
+  </article>
+</section>
+
+<section class="two-column">
+  <article class="panel">
+    <h2>最近执行</h2>
+    <p class="empty-state">暂无执行记录</p>
+  </article>
+  <article class="panel">
+    <h2>邮件概览</h2>
+    <p class="empty-state">暂无邮件日志</p>
+  </article>
+</section>
+{% endblock %}

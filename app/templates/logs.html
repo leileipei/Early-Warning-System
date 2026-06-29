@@ -1,0 +1,34 @@
+{% extends "base.html" %}
+
+{% block content %}
+<section class="page-header">
+  <div>
+    <p class="eyebrow">审计</p>
+    <h1>日志</h1>
+  </div>
+</section>
+
+<section class="panel">
+  <div class="tabs" aria-label="日志类型">
+    <button class="tab is-active" type="button">执行日志</button>
+    <button class="tab" type="button">邮件日志</button>
+  </div>
+  <div class="table-shell">
+    <table>
+      <thead>
+        <tr>
+          <th>时间</th>
+          <th>对象</th>
+          <th>结果</th>
+          <th>摘要</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td colspan="4" class="empty-cell">暂无日志</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endblock %}
