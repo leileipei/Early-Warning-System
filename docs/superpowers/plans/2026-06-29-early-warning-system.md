@@ -1977,7 +1977,7 @@ git commit -m "feat: manage warning rules and settings"
 - Modify: `app/worker.py`
 - Create: `tests/test_executor.py` additions
 
-- [ ] **Step 1: Add failing persistence-backed execution test**
+- [x] **Step 1: Add failing persistence-backed execution test**
 
 Add to `tests/test_executor.py`:
 
@@ -1995,13 +1995,13 @@ def test_executor_persists_execution_summary(session):
     assert result.email_count == 1
 ```
 
-- [ ] **Step 2: Run test**
+- [x] **Step 2: Run test**
 
 Run: `pytest tests/test_executor.py -v`
 
 Expected: pass for the current unit behavior. Then add route-level manual execution test once repositories are wired.
 
-- [ ] **Step 3: Add persistence writes in route orchestration**
+- [x] **Step 3: Add persistence writes in route orchestration**
 
 In `app/routes.py`, implement `POST /rules/{rule_id}/run`:
 
@@ -2065,7 +2065,7 @@ def build_smtp_mailer(config: SmtpConfig) -> SmtpMailer:
 
 Tests should monkeypatch these helpers to return fakes.
 
-- [ ] **Step 4: Wire worker**
+- [x] **Step 4: Wire worker**
 
 Update `app/worker.py` so `main()`:
 
@@ -2075,13 +2075,13 @@ Update `app/worker.py` so `main()`:
 4. For each job, opens a new session and calls the same rule execution helper used by manual execution.
 5. Starts the scheduler and sleeps until interrupted.
 
-- [ ] **Step 5: Run route and executor tests**
+- [x] **Step 5: Run route and executor tests**
 
 Run: `pytest tests/test_routes.py tests/test_executor.py tests/test_scheduler.py -v`
 
 Expected: pass.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add app/executor.py app/routes.py app/worker.py tests/test_executor.py tests/test_routes.py

@@ -1,8 +1,19 @@
 import pytest
+from sqlmodel import select
 
+import app.execution_service as execution_service
 from app.executor import RuleExecutor
 from app.mailer import MailSendResult
-from app.models import AlertRule, ExecutionStatus, SendMode
+from app.models import (
+    AlertRule,
+    ExecutionStatus,
+    MailLog,
+    MailStatus,
+    SendMode,
+    SmtpConfig,
+    SqlDataSource,
+    TriggerType,
+)
 
 
 class FakeSqlClient:
@@ -57,6 +68,45 @@ def make_rule(send_mode=SendMode.SUMMARY, **overrides):
     }
     data.update(overrides)
     return AlertRule(**data)
+
+
+def persist_data_source(session, *, enabled=True):
+    data_source = SqlDataSource(
+        name="生产库",
+        host="db.example.com",
+        port=1433,
+        database="erp",
+        username="readonly",
+        encrypted_password="encrypted",
+        enabled=enabled,
+    )
+    session.add(data_source)
+    session.commit()
+    session.refresh(data_source)
+    return data_source
+
+
+def persist_smtp_config(session):
+    smtp_config = SmtpConfig(
+        host="smtp.example.com",
+        port=587,
+        username="mailer",
+        encrypted_password="encrypted",
+        sender="alerts@example.com",
+        enabled=True,
+    )
+    session.add(smtp_config)
+    session.commit()
+    session.refresh(smtp_config)
+    return smtp_config
+
+
+def persist_rule(session, data_source, **overrides):
+    rule = make_rule(data_source_id=data_source.id, **overrides)
+    session.add(rule)
+    session.commit()
+    session.refresh(rule)
+    return rule
 
 
 def test_summary_mode_sends_one_email_with_all_rows():
@@ -263,3 +313,72 @@ def test_execute_accepts_optional_legacy_trigger_argument(legacy_trigger_arg):
         result = executor.execute(make_rule(), legacy_trigger_arg)
 
     assert result.status == ExecutionStatus.SUCCESS
+
+
+def test_execute_rule_by_id_persists_failed_execution_when_sql_client_fails(monkeypatch, session):
+    data_source = persist_data_source(session)
+    persist_smtp_config(session)
+    rule = persist_rule(session, data_source)
+    monkeypatch.setattr(
+        execution_service,
+        "build_sql_client",
+        lambda data_source: FakeSqlClient(error=RuntimeError("query timed out")),
+    )
+    monkeypatch.setattr(execution_service, "build_smtp_mailer", lambda config: FakeMailer())
+
+    execution_log = execution_service.execute_rule_by_id(session, rule.id, TriggerType.MANUAL)
+
+    assert execution_log.status == ExecutionStatus.FAILED
+    assert execution_log.row_count == 0
+    assert execution_log.email_count == 0
+    assert execution_log.error_type == "RuntimeError"
+    assert execution_log.error_message == "query timed out"
+    assert execution_log.duration_ms >= 0
+    assert execution_log.finished_at is not None
+    assert session.exec(select(MailLog)).all() == []
+
+
+def test_execute_rule_by_id_persists_partial_mail_results(monkeypatch, session):
+    data_source = persist_data_source(session)
+    persist_smtp_config(session)
+    rule = persist_rule(session, data_source, send_mode=SendMode.PER_ROW, body_template="{{id}}")
+    monkeypatch.setattr(
+        execution_service,
+        "build_sql_client",
+        lambda data_source: FakeSqlClient([{"id": 1}, {"id": 2}]),
+    )
+    monkeypatch.setattr(
+        execution_service,
+        "build_smtp_mailer",
+        lambda config: FakeMailer(
+            results=[
+                MailSendResult(success=True),
+                MailSendResult(success=False, error_message="smtp rejected"),
+            ]
+        ),
+    )
+
+    execution_log = execution_service.execute_rule_by_id(session, rule.id, TriggerType.MANUAL)
+
+    assert execution_log.status == ExecutionStatus.PARTIAL_FAILED
+    assert execution_log.row_count == 2
+    assert execution_log.email_count == 1
+    assert execution_log.error_type == "MailSendError"
+    mail_logs = session.exec(select(MailLog).order_by(MailLog.id)).all()
+    assert [mail_log.status for mail_log in mail_logs] == [MailStatus.SUCCESS, MailStatus.FAILED]
+    assert [mail_log.subject for mail_log in mail_logs] == ["预警", "预警"]
+    assert mail_logs[0].recipients == "ops@example.com"
+    assert mail_logs[1].error_message == "smtp rejected"
+
+
+def test_execute_rule_by_id_persists_failed_log_when_data_source_disabled(session):
+    data_source = persist_data_source(session, enabled=False)
+    persist_smtp_config(session)
+    rule = persist_rule(session, data_source)
+
+    execution_log = execution_service.execute_rule_by_id(session, rule.id, TriggerType.MANUAL)
+
+    assert execution_log.status == ExecutionStatus.FAILED
+    assert execution_log.error_type == "ConfigurationError"
+    assert "数据源" in execution_log.error_message
+    assert session.exec(select(MailLog)).all() == []

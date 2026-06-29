@@ -72,3 +72,30 @@ def test_worker_import_does_not_block():
     worker = importlib.import_module("app.worker")
 
     assert callable(worker.main)
+
+
+def test_worker_execute_rule_callback_opens_session_and_uses_scheduled_trigger():
+    worker = importlib.import_module("app.worker")
+    calls = []
+    sessions = []
+
+    class FakeSession:
+        def __enter__(self):
+            sessions.append("opened")
+            return "session"
+
+        def __exit__(self, exc_type, exc, traceback):
+            sessions.append("closed")
+
+    def execute_rule_by_id(session, rule_id, trigger_type):
+        calls.append((session, rule_id, trigger_type))
+
+    callback = worker.build_execute_rule_callback(
+        session_factory=FakeSession,
+        execute_rule_by_id_fn=execute_rule_by_id,
+    )
+
+    callback(7)
+
+    assert sessions == ["opened", "closed"]
+    assert calls == [("session", 7, worker.TriggerType.SCHEDULED)]

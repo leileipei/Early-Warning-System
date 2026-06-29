@@ -9,6 +9,7 @@ from app.models import (
     AdminUser,
     AlertRule,
     ExecutionLog,
+    ExecutionStatus,
     MailLog,
     MailStatus,
     SendMode,
@@ -65,6 +66,42 @@ def _create_data_source(session):
     session.commit()
     session.refresh(data_source)
     return data_source
+
+
+def _create_smtp_config(session, *, enabled=True):
+    smtp_config = SmtpConfig(
+        host="smtp.example.com",
+        port=587,
+        username="mailer",
+        encrypted_password="encrypted",
+        sender="alerts@example.com",
+        enabled=enabled,
+    )
+    session.add(smtp_config)
+    session.commit()
+    session.refresh(smtp_config)
+    return smtp_config
+
+
+def _create_rule(session, data_source, **overrides):
+    data = {
+        "name": "大额订单",
+        "data_source_id": data_source.id,
+        "sql_text": "select id, amount from orders",
+        "cron_expression": "0 9 * * *",
+        "recipients": "ops@example.com",
+        "cc_recipients": "",
+        "subject_template": "大额订单预警",
+        "body_template": "{{table}}",
+        "send_mode": SendMode.SUMMARY,
+        "enabled": True,
+    }
+    data.update(overrides)
+    rule = AlertRule(**data)
+    session.add(rule)
+    session.commit()
+    session.refresh(rule)
+    return rule
 
 
 def _valid_rule_form(data_source_id):
@@ -559,6 +596,97 @@ def test_logs_page_requires_login(monkeypatch):
 
         assert response.status_code == 401
     finally:
+        get_settings.cache_clear()
+
+
+def test_run_rule_requires_login(monkeypatch):
+    _set_required_settings(monkeypatch)
+    create_app, get_settings = _load_create_app()
+    try:
+        client = TestClient(create_app())
+
+        response = client.post("/rules/1/run")
+
+        assert response.status_code == 401
+    finally:
+        get_settings.cache_clear()
+
+
+def test_run_rule_persists_success_and_redirects(monkeypatch, session):
+    import app.execution_service as execution_service
+
+    from app.mailer import MailSendResult
+    from app.sql_client import QueryResult
+
+    class FakeSqlClient:
+        def query(self, sql, timeout_seconds, max_rows):
+            return QueryResult(rows=[{"id": 1, "amount": 100}])
+
+    class FakeMailer:
+        def send(self, message):
+            return MailSendResult(success=True)
+
+    data_source = _create_data_source(session)
+    _create_smtp_config(session)
+    rule = _create_rule(session, data_source)
+    monkeypatch.setattr(execution_service, "build_sql_client", lambda data_source: FakeSqlClient())
+    monkeypatch.setattr(execution_service, "build_smtp_mailer", lambda config: FakeMailer())
+    client, get_settings, app = _client_with_admin(monkeypatch, session)
+    try:
+        response = client.post(f"/rules/{rule.id}/run", follow_redirects=False)
+
+        assert response.status_code == 303
+        assert response.headers["location"] == "/logs"
+        execution_log = session.exec(select(ExecutionLog)).one()
+        assert execution_log.status == ExecutionStatus.SUCCESS
+        assert execution_log.trigger_type == TriggerType.MANUAL
+        assert execution_log.row_count == 1
+        assert execution_log.email_count == 1
+        mail_log = session.exec(select(MailLog)).one()
+        assert mail_log.status == MailStatus.SUCCESS
+        assert mail_log.subject == "大额订单预警"
+    finally:
+        app.dependency_overrides.clear()
+        get_settings.cache_clear()
+
+
+def test_run_rule_missing_smtp_persists_failed_log_without_500(monkeypatch, session):
+    data_source = _create_data_source(session)
+    rule = _create_rule(session, data_source)
+    client, get_settings, app = _client_with_admin(monkeypatch, session)
+    try:
+        response = client.post(f"/rules/{rule.id}/run", follow_redirects=False)
+
+        assert response.status_code == 303
+        assert response.headers["location"] == "/logs"
+        execution_log = session.exec(select(ExecutionLog)).one()
+        assert execution_log.status == ExecutionStatus.FAILED
+        assert execution_log.error_type == "ConfigurationError"
+        assert "SMTP" in execution_log.error_message
+    finally:
+        app.dependency_overrides.clear()
+        get_settings.cache_clear()
+
+
+def test_run_rule_disabled_data_source_persists_failed_log_without_500(monkeypatch, session):
+    data_source = _create_data_source(session)
+    data_source.enabled = False
+    session.add(data_source)
+    session.commit()
+    rule = _create_rule(session, data_source)
+    _create_smtp_config(session)
+    client, get_settings, app = _client_with_admin(monkeypatch, session)
+    try:
+        response = client.post(f"/rules/{rule.id}/run", follow_redirects=False)
+
+        assert response.status_code == 303
+        assert response.headers["location"] == "/logs"
+        execution_log = session.exec(select(ExecutionLog)).one()
+        assert execution_log.status == ExecutionStatus.FAILED
+        assert execution_log.error_type == "ConfigurationError"
+        assert "数据源" in execution_log.error_message
+    finally:
+        app.dependency_overrides.clear()
         get_settings.cache_clear()
 
 

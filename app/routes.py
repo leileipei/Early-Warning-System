@@ -1,5 +1,5 @@
 from apscheduler.triggers.cron import CronTrigger
-from fastapi import APIRouter, Depends, Form, Request
+from fastapi import APIRouter, Depends, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from sqlmodel import Session, select
@@ -7,6 +7,7 @@ from sqlmodel import Session, select
 from app.auth import require_admin
 from app.crypto import SecretCipher
 from app.db import get_session
+from app.execution_service import execute_rule_by_id
 from app.models import (
     AdminUser,
     AlertRule,
@@ -15,6 +16,7 @@ from app.models import (
     SendMode,
     SmtpConfig,
     SqlDataSource,
+    TriggerType,
 )
 from app.paths import TEMPLATES_DIR
 from app.settings import get_settings
@@ -195,6 +197,20 @@ def create_rule(
     session.add(rule)
     session.commit()
     return RedirectResponse("/rules", status_code=303)
+
+
+@router.post("/rules/{rule_id}/run")
+def run_rule(
+    rule_id: int,
+    admin: AdminUser = Depends(require_admin),
+    session: Session = Depends(get_session),
+):
+    _ = admin
+    if session.get(AlertRule, rule_id) is None:
+        raise HTTPException(status_code=404, detail="规则不存在")
+
+    execute_rule_by_id(session, rule_id, trigger_type=TriggerType.MANUAL)
+    return RedirectResponse("/logs", status_code=303)
 
 
 @router.get("/settings", response_class=HTMLResponse)
