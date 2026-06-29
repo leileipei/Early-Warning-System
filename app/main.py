@@ -1,8 +1,10 @@
 from fastapi import FastAPI
 
+from app.settings import get_settings
+
 
 def create_app() -> FastAPI:
-    app = FastAPI(title="SQL 预警系统")
+    app = FastAPI(title=get_settings().app_name)
 
     @app.get("/health")
     def health() -> dict[str, str]:
