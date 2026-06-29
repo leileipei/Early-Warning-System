@@ -16,6 +16,20 @@ def test_render_summary_includes_html_table():
     assert "12000" in message.html_body
 
 
+def test_render_summary_subject_uses_context_table_but_body_uses_generated_table():
+    message = render_summary(
+        subject_template="{{table}}",
+        body_template="{{table}}",
+        rows=[{"id": 1, "amount": 12000}],
+        context={"table": "subject-table"},
+    )
+
+    assert message.subject == "subject-table"
+    assert "<table" in message.html_body
+    assert "12000" in message.html_body
+    assert message.html_body != "subject-table"
+
+
 def test_render_per_row_uses_current_row():
     message = render_per_row(
         subject_template="订单 {{id}}",

@@ -42,10 +42,10 @@ def render_summary(
     rows: list[dict],
     context: dict,
 ) -> RenderedMessage:
-    merged = {**context, "table": Markup(_table(rows))}
+    body_context = {**context, "table": Markup(_table(rows))}
     return RenderedMessage(
-        subject=_render(subject_template, merged),
-        html_body=_render(body_template, merged),
+        subject=_render(subject_template, context),
+        html_body=_render(body_template, body_context),
     )
 
 
