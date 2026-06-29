@@ -5,11 +5,11 @@ FastAPI + SQLite + SQL Server + SMTP 的独立预警系统。
 ## 本地启动
 
 ```bash
-python -m venv .venv
+python3 -m venv .venv
 source .venv/bin/activate
 cp .env.example .env
 pip install -e ".[dev]"
 uvicorn app.main:app --reload
 ```
 
-启动前请替换 `.env` 中的 `SESSION_SECRET` 和 `SECRET_KEY`。
+启动前必须替换 `.env` 中的 `SESSION_SECRET` 和 `SECRET_KEY`，否则应用不会正常启动。

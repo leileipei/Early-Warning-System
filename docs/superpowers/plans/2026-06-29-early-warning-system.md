@@ -96,18 +96,36 @@ Responsibilities:
 
 ```python
 # tests/test_routes.py
+import importlib
+
 from fastapi.testclient import TestClient
 
-from app.main import create_app
+
+def _set_required_settings(monkeypatch):
+    monkeypatch.setenv("SESSION_SECRET", "test-session-secret")
+    monkeypatch.setenv("SECRET_KEY", "test-secret-key")
 
 
-def test_health_endpoint_returns_ok():
-    client = TestClient(create_app())
+def _load_create_app():
+    from app.settings import get_settings
 
-    response = client.get("/health")
+    get_settings.cache_clear()
+    main = importlib.import_module("app.main")
+    return main.create_app, get_settings
 
-    assert response.status_code == 200
-    assert response.json() == {"status": "ok"}
+
+def test_health_endpoint_returns_ok(monkeypatch):
+    _set_required_settings(monkeypatch)
+    create_app, get_settings = _load_create_app()
+    try:
+        client = TestClient(create_app())
+
+        response = client.get("/health")
+
+        assert response.status_code == 200
+        assert response.json() == {"status": "ok"}
+    finally:
+        get_settings.cache_clear()
 ```
 
 - [ ] **Step 2: Run the test to verify it fails**
@@ -162,15 +180,17 @@ target-version = "py311"
 ```python
 # app/settings.py
 from functools import lru_cache
-from pydantic import Field
-from pydantic_settings import BaseSettings
+
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
+    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
+
     app_name: str = "SQL 预警系统"
     database_url: str = "sqlite:///./early_warning.sqlite3"
-    session_secret: str = Field(default="change-me-in-production")
-    secret_key: str = Field(default="0123456789abcdef0123456789abcdef")
+    session_secret: str
+    secret_key: str
 
 
 @lru_cache
@@ -182,9 +202,11 @@ def get_settings() -> Settings:
 # app/main.py
 from fastapi import FastAPI
 
+from app.settings import get_settings
+
 
 def create_app() -> FastAPI:
-    app = FastAPI(title="SQL 预警系统")
+    app = FastAPI(title=get_settings().app_name)
 
     @app.get("/health")
     def health() -> dict[str, str]:
@@ -199,8 +221,8 @@ app = create_app()
 ```text
 # .env.example
 DATABASE_URL=sqlite:///./early_warning.sqlite3
-SESSION_SECRET=replace-with-random-session-secret
-SECRET_KEY=replace-with-32-byte-url-safe-fernet-key
+SESSION_SECRET=REPLACE_ME_WITH_RANDOM_SESSION_SECRET
+SECRET_KEY=REPLACE_ME_WITH_32_BYTE_URL_SAFE_FERNET_KEY
 ```
 
 Create `README.md` with:
@@ -213,11 +235,14 @@ FastAPI + SQLite + SQL Server + SMTP 的独立预警系统。
 ## 本地启动
 
 ```bash
-python -m venv .venv
+python3 -m venv .venv
 source .venv/bin/activate
+cp .env.example .env
 pip install -e ".[dev]"
 uvicorn app.main:app --reload
 ```
+
+启动前必须替换 `.env` 中的 `SESSION_SECRET` 和 `SECRET_KEY`，否则应用不会正常启动。
 ~~~
 
 - [ ] **Step 5: Run the test to verify it passes**
