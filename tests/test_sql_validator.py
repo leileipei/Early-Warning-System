@@ -11,6 +11,10 @@ def test_allows_cte_select():
     validate_select_sql("with recent as (select id from orders) select * from recent")
 
 
+def test_allows_single_trailing_semicolon():
+    validate_select_sql("select id from orders;")
+
+
 def test_allows_comments_without_treating_words_inside_as_sql():
     validate_select_sql("select id from orders -- update is just a comment")
 
@@ -25,6 +29,9 @@ def test_allows_comments_without_treating_words_inside_as_sql():
         "exec dbo.build_warning",
         "select * from orders; delete from orders",
         "SELECT * FROM orders WHERE id IN (DELETE)",
+        ";select 1",
+        "select 1;;",
+        "select 1; select 2",
     ],
 )
 def test_rejects_non_read_only_sql(sql):
