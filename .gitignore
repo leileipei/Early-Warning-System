@@ -1,0 +1,8 @@
+.superpowers/
+__pycache__/
+.venv/
+*.pyc
+*.db
+*.sqlite
+*.sqlite3
+.env
