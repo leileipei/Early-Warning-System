@@ -12,6 +12,9 @@ DANGEROUS_WORDS = {
     "into",
     "insert",
     "merge",
+    "opendatasource",
+    "openquery",
+    "openrowset",
     "truncate",
     "update",
 }
