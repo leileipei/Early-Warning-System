@@ -36,10 +36,27 @@ def test_allows_dangerous_words_inside_string_literals(sql):
         "select 1 -- ; delete from x",
         "select ';' as semicolon",
         "select 1; -- comment",
+        "select 1; /* comment */",
     ],
 )
 def test_allows_semicolons_inside_comments_and_string_literals(sql):
     validate_select_sql(sql)
+
+
+@pytest.mark.parametrize(
+    "sql",
+    [
+        "select 1; 'tail'",
+        'select 1; "tail"',
+        "select 1; [tail]",
+        "select 1; 2",
+        "select 1; +",
+        "select 1; tail",
+    ],
+)
+def test_rejects_any_non_comment_content_after_real_semicolon(sql):
+    with pytest.raises(SqlValidationError):
+        validate_select_sql(sql)
 
 
 @pytest.mark.parametrize(

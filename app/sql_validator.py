@@ -48,6 +48,9 @@ def _scan_sql(sql: str) -> tuple[list[str], int, bool]:
             index = min(index + 2, len(sql))
             continue
 
+        if semicolon_count:
+            content_after_semicolon = True
+
         if char in {"'", '"'}:
             quote = char
             index += 1
@@ -65,9 +68,6 @@ def _scan_sql(sql: str) -> tuple[list[str], int, bool]:
             semicolon_count += 1
             index += 1
             continue
-
-        if semicolon_count:
-            content_after_semicolon = True
 
         if _is_word_char(char):
             start = index
