@@ -3,6 +3,9 @@ import importlib
 import pytest
 from fastapi.testclient import TestClient
 from pydantic import ValidationError
+from sqlmodel import select
+
+from app.models import AdminUser, AlertRule, SmtpConfig, SqlDataSource
 
 VALID_FERNET_KEY = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
 
@@ -18,6 +21,57 @@ def _load_create_app():
     get_settings.cache_clear()
     main = importlib.import_module("app.main")
     return main.create_app, get_settings
+
+
+def _admin_user():
+    return AdminUser(id=1, username="admin", password_hash="hash")
+
+
+def _client_with_admin(monkeypatch, session):
+    _set_required_settings(monkeypatch)
+    create_app, get_settings = _load_create_app()
+    routes = importlib.import_module("app.routes")
+    app = create_app()
+
+    def override_session():
+        yield session
+
+    app.dependency_overrides[routes.require_admin] = _admin_user
+    app.dependency_overrides[routes.get_session] = override_session
+    return TestClient(app), get_settings, app
+
+
+def _create_data_source(session):
+    data_source = SqlDataSource(
+        name="生产库",
+        host="db.example.com",
+        port=1433,
+        database="erp",
+        username="readonly",
+        encrypted_password="encrypted",
+        enabled=True,
+    )
+    session.add(data_source)
+    session.commit()
+    session.refresh(data_source)
+    return data_source
+
+
+def _valid_rule_form(data_source_id):
+    return {
+        "name": "大额订单",
+        "data_source_id": str(data_source_id),
+        "sql_text": "select id, amount from orders",
+        "cron_expression": "0 9 * * *",
+        "recipients": "ops@example.com",
+        "cc_recipients": "",
+        "subject_template": "大额订单预警",
+        "body_template": "{{table}}",
+        "send_mode": "summary",
+        "query_timeout_seconds": "30",
+        "max_rows": "500",
+        "enabled": "on",
+    }
 
 
 def test_health_endpoint_returns_ok(monkeypatch):
@@ -164,6 +218,145 @@ def test_settings_page_requires_login(monkeypatch):
         client = TestClient(create_app())
 
         response = client.get("/settings")
+
+        assert response.status_code == 401
+    finally:
+        get_settings.cache_clear()
+
+
+def test_create_rule_requires_admin_session(monkeypatch):
+    _set_required_settings(monkeypatch)
+    create_app, get_settings = _load_create_app()
+    try:
+        client = TestClient(create_app())
+
+        response = client.post("/rules", data={"name": "x"})
+
+        assert response.status_code == 401
+    finally:
+        get_settings.cache_clear()
+
+
+def test_create_rule_persists_alert_rule(monkeypatch, session):
+    data_source = _create_data_source(session)
+    client, get_settings, app = _client_with_admin(monkeypatch, session)
+    try:
+        response = client.post("/rules", data=_valid_rule_form(data_source.id))
+
+        assert response.status_code == 303
+        assert response.headers["location"] == "/rules"
+        rule = session.exec(select(AlertRule)).one()
+        assert rule.name == "大额订单"
+        assert rule.data_source_id == data_source.id
+        assert rule.sql_text == "select id, amount from orders"
+        assert rule.enabled is True
+    finally:
+        app.dependency_overrides.clear()
+        get_settings.cache_clear()
+
+
+def test_create_rule_rejects_non_select_sql_without_saving(monkeypatch, session):
+    data_source = _create_data_source(session)
+    form_data = _valid_rule_form(data_source.id)
+    form_data["sql_text"] = "delete from orders"
+    client, get_settings, app = _client_with_admin(monkeypatch, session)
+    try:
+        response = client.post("/rules", data=form_data)
+
+        assert response.status_code == 400
+        assert "只允许 SELECT 查询" in response.text
+        assert session.exec(select(AlertRule)).all() == []
+    finally:
+        app.dependency_overrides.clear()
+        get_settings.cache_clear()
+
+
+def test_create_rule_rejects_invalid_data_source_without_saving(monkeypatch, session):
+    client, get_settings, app = _client_with_admin(monkeypatch, session)
+    try:
+        response = client.post("/rules", data=_valid_rule_form(999))
+
+        assert response.status_code == 400
+        assert "请选择有效的数据源" in response.text
+        assert session.exec(select(AlertRule)).all() == []
+    finally:
+        app.dependency_overrides.clear()
+        get_settings.cache_clear()
+
+
+def test_create_sql_server_settings_requires_admin_session(monkeypatch):
+    _set_required_settings(monkeypatch)
+    create_app, get_settings = _load_create_app()
+    try:
+        client = TestClient(create_app())
+
+        response = client.post("/settings/sql-server", data={"name": "生产库"})
+
+        assert response.status_code == 401
+    finally:
+        get_settings.cache_clear()
+
+
+def test_create_sql_server_settings_encrypts_password(monkeypatch, session):
+    client, get_settings, app = _client_with_admin(monkeypatch, session)
+    try:
+        response = client.post(
+            "/settings/sql-server",
+            data={
+                "name": "生产库",
+                "host": "db.example.com",
+                "port": "1433",
+                "database": "erp",
+                "username": "readonly",
+                "password": "plain-password",
+                "enabled": "on",
+                "connect_timeout_seconds": "15",
+            },
+        )
+
+        assert response.status_code == 303
+        data_source = session.exec(select(SqlDataSource)).one()
+        assert data_source.encrypted_password != "plain-password"
+        assert data_source.connect_timeout_seconds == 15
+    finally:
+        app.dependency_overrides.clear()
+        get_settings.cache_clear()
+
+
+def test_create_smtp_settings_encrypts_password(monkeypatch, session):
+    client, get_settings, app = _client_with_admin(monkeypatch, session)
+    try:
+        response = client.post(
+            "/settings/smtp",
+            data={
+                "host": "smtp.example.com",
+                "port": "587",
+                "username": "mailer",
+                "password": "smtp-password",
+                "sender": "alerts@example.com",
+                "use_tls": "on",
+                "timeout_seconds": "20",
+                "enabled": "on",
+            },
+        )
+
+        assert response.status_code == 303
+        smtp_config = session.exec(select(SmtpConfig)).one()
+        assert smtp_config.encrypted_password != "smtp-password"
+        assert smtp_config.use_tls is True
+        assert smtp_config.use_ssl is False
+    finally:
+        app.dependency_overrides.clear()
+        get_settings.cache_clear()
+
+
+def test_logs_page_requires_login(monkeypatch):
+    _set_required_settings(monkeypatch)
+    create_app, get_settings = _load_create_app()
+    try:
+        client = TestClient(create_app())
+
+        response = client.get("/logs")
 
         assert response.status_code == 401
     finally:

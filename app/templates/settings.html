@@ -11,31 +11,137 @@
 <section class="two-column">
   <article class="panel">
     <h2>SQL Server</h2>
-    <form class="stacked-form">
+    <form class="stacked-form" method="post" action="/settings/sql-server">
+      <label>
+        <span>名称</span>
+        <input name="name" required>
+      </label>
       <label>
         <span>主机</span>
-        <input name="sql_host">
+        <input name="host" required>
+      </label>
+      <label>
+        <span>端口</span>
+        <input name="port" type="number" value="1433" required>
       </label>
       <label>
         <span>数据库</span>
-        <input name="sql_database">
+        <input name="database" required>
       </label>
-      <button class="button" type="button">保存数据源</button>
+      <label>
+        <span>用户名</span>
+        <input name="username" required>
+      </label>
+      <label>
+        <span>密码</span>
+        <input name="password" type="password" required>
+      </label>
+      <label>
+        <span>连接超时（秒）</span>
+        <input name="connect_timeout_seconds" type="number" value="10" min="1">
+      </label>
+      <label>
+        <span>启用</span>
+        <input name="enabled" type="checkbox" checked>
+      </label>
+      <button class="button" type="submit">保存数据源</button>
     </form>
+    <div class="table-shell">
+      <table>
+        <thead>
+          <tr>
+            <th>名称</th>
+            <th>主机</th>
+            <th>数据库</th>
+            <th>状态</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for data_source in data_sources %}
+          <tr>
+            <td>{{ data_source.name }}</td>
+            <td>{{ data_source.host }}:{{ data_source.port }}</td>
+            <td>{{ data_source.database }}</td>
+            <td>{{ "启用" if data_source.enabled else "停用" }}</td>
+          </tr>
+          {% else %}
+          <tr>
+            <td colspan="4" class="empty-cell">暂无数据源</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
   </article>
   <article class="panel">
     <h2>SMTP</h2>
-    <form class="stacked-form">
+    <form class="stacked-form" method="post" action="/settings/smtp">
       <label>
         <span>服务器</span>
-        <input name="smtp_host">
+        <input name="host" required>
+      </label>
+      <label>
+        <span>端口</span>
+        <input name="port" type="number" value="587" required>
+      </label>
+      <label>
+        <span>用户名</span>
+        <input name="username" required>
+      </label>
+      <label>
+        <span>密码</span>
+        <input name="password" type="password" required>
       </label>
       <label>
         <span>发件人</span>
-        <input name="smtp_from">
+        <input name="sender" required>
       </label>
-      <button class="button" type="button">保存邮件配置</button>
+      <label>
+        <span>超时（秒）</span>
+        <input name="timeout_seconds" type="number" value="10" min="1">
+      </label>
+      <label>
+        <span>TLS</span>
+        <input name="use_tls" type="checkbox" checked>
+      </label>
+      <label>
+        <span>SSL</span>
+        <input name="use_ssl" type="checkbox">
+      </label>
+      <label>
+        <span>启用</span>
+        <input name="enabled" type="checkbox" checked>
+      </label>
+      <button class="button" type="submit">保存邮件配置</button>
     </form>
+    <div class="table-shell">
+      <table>
+        <thead>
+          <tr>
+            <th>服务器</th>
+            <th>发件人</th>
+            <th>安全</th>
+            <th>状态</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for smtp_config in smtp_configs %}
+          <tr>
+            <td>{{ smtp_config.host }}:{{ smtp_config.port }}</td>
+            <td>{{ smtp_config.sender }}</td>
+            <td>
+              {% if smtp_config.use_ssl %}SSL{% elif smtp_config.use_tls %}TLS{% else %}无{% endif %}
+            </td>
+            <td>{{ "启用" if smtp_config.enabled else "停用" }}</td>
+          </tr>
+          {% else %}
+          <tr>
+            <td colspan="4" class="empty-cell">暂无 SMTP 配置</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
   </article>
 </section>
 {% endblock %}

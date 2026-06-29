@@ -9,24 +9,70 @@
 </section>
 
 <section class="panel">
-  <div class="tabs" aria-label="日志类型">
-    <button class="tab is-active" type="button">执行日志</button>
-    <button class="tab" type="button">邮件日志</button>
-  </div>
+  <h2>执行日志</h2>
   <div class="table-shell">
     <table>
       <thead>
         <tr>
-          <th>时间</th>
-          <th>对象</th>
-          <th>结果</th>
-          <th>摘要</th>
+          <th>开始时间</th>
+          <th>规则 ID</th>
+          <th>触发</th>
+          <th>状态</th>
+          <th>行数</th>
+          <th>邮件</th>
+          <th>错误</th>
         </tr>
       </thead>
       <tbody>
+        {% for log in execution_logs %}
         <tr>
-          <td colspan="4" class="empty-cell">暂无日志</td>
+          <td>{{ log.started_at }}</td>
+          <td>{{ log.rule_id }}</td>
+          <td>{{ log.trigger_type }}</td>
+          <td>{{ log.status }}</td>
+          <td>{{ log.row_count }}</td>
+          <td>{{ log.email_count }}</td>
+          <td>{{ log.error_message }}</td>
         </tr>
+        {% else %}
+        <tr>
+          <td colspan="7" class="empty-cell">暂无执行日志</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section class="panel">
+  <h2>邮件日志</h2>
+  <div class="table-shell">
+    <table>
+      <thead>
+        <tr>
+          <th>发送时间</th>
+          <th>执行 ID</th>
+          <th>收件人</th>
+          <th>主题</th>
+          <th>状态</th>
+          <th>错误</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for log in mail_logs %}
+        <tr>
+          <td>{{ log.sent_at }}</td>
+          <td>{{ log.execution_log_id }}</td>
+          <td>{{ log.recipients }}</td>
+          <td>{{ log.subject }}</td>
+          <td>{{ log.status }}</td>
+          <td>{{ log.error_message }}</td>
+        </tr>
+        {% else %}
+        <tr>
+          <td colspan="6" class="empty-cell">暂无邮件日志</td>
+        </tr>
+        {% endfor %}
       </tbody>
     </table>
   </div>

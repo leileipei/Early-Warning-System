@@ -98,3 +98,7 @@ def validate_select_sql(sql: str) -> None:
     if blocked:
         blocked_list = ", ".join(sorted(blocked))
         raise SqlValidationError(f"SQL 包含禁止关键字: {blocked_list}")
+
+
+def validate_select_only_sql(sql: str) -> None:
+    validate_select_sql(sql)

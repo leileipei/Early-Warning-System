@@ -1890,7 +1890,7 @@ git commit -m "feat: add admin page shell"
 - Modify: `app/templates/logs.html`
 - Modify: `tests/test_routes.py`
 
-- [ ] **Step 1: Add failing CRUD test**
+- [x] **Step 1: Add failing CRUD test**
 
 Add to `tests/test_routes.py`:
 
@@ -1903,13 +1903,13 @@ def test_create_rule_requires_admin_session():
     assert response.status_code == 401
 ```
 
-- [ ] **Step 2: Run test to verify failure mode**
+- [x] **Step 2: Run test to verify failure mode**
 
 Run: `pytest tests/test_routes.py::test_create_rule_requires_admin_session -v`
 
 Expected: fail if `/rules` POST returns 405 instead of 401.
 
-- [ ] **Step 3: Implement protected form handlers**
+- [x] **Step 3: Implement protected form handlers**
 
 Extend `app/routes.py` with protected `GET /rules/new`, `POST /rules`, `GET /settings`, `POST /settings/sql-server`, `POST /settings/smtp`, and `GET /logs`. Each handler must depend on `require_admin`. Use `Session = Depends(get_session)` to insert or query `SqlDataSource`, `SmtpConfig`, `AlertRule`, `ExecutionLog`, and `MailLog`.
 
@@ -1934,7 +1934,7 @@ rule = AlertRule(
 
 Call `validate_select_sql(sql_text)` before saving. On validation error, return the form with status code `400` and the validation message.
 
-- [ ] **Step 4: Update templates**
+- [x] **Step 4: Update templates**
 
 Replace placeholder text with forms containing the exact field names used by routes:
 
@@ -1956,13 +1956,13 @@ Replace placeholder text with forms containing the exact field names used by rou
 <input name="enabled" type="checkbox" checked>
 ```
 
-- [ ] **Step 5: Run focused route tests**
+- [x] **Step 5: Run focused route tests**
 
 Run: `pytest tests/test_routes.py -v`
 
 Expected: pass. Any test using database writes should override `get_session` with the in-memory `session` fixture.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add app/routes.py app/templates tests/test_routes.py

@@ -17,13 +17,22 @@
           <th>规则名称</th>
           <th>调度</th>
           <th>状态</th>
-          <th>最近执行</th>
+          <th>发送方式</th>
         </tr>
       </thead>
       <tbody>
+        {% for rule in rules %}
+        <tr>
+          <td>{{ rule.name }}</td>
+          <td>{{ rule.cron_expression }}</td>
+          <td>{{ "启用" if rule.enabled else "停用" }}</td>
+          <td>{{ "汇总一封" if rule.send_mode == "summary" else "每行一封" }}</td>
+        </tr>
+        {% else %}
         <tr>
           <td colspan="4" class="empty-cell">暂无规则</td>
         </tr>
+        {% endfor %}
       </tbody>
     </table>
   </div>
