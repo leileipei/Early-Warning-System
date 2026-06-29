@@ -2094,7 +2094,7 @@ git commit -m "feat: persist rule execution results"
 - Modify: `README.md`
 - Modify: `.env.example`
 
-- [ ] **Step 1: Update README with run commands**
+- [x] **Step 1: Update README with run commands**
 
 Replace the setup section in `README.md` with:
 
@@ -2132,7 +2132,7 @@ ruff check .
 生产环境需要安装 Microsoft ODBC Driver 18 for SQL Server，并为预警系统配置只读 SQL Server 账号。
 ~~~
 
-- [ ] **Step 2: Run all verification**
+- [x] **Step 2: Run all verification**
 
 Run: `pytest`
 
@@ -2142,13 +2142,13 @@ Run: `ruff check .`
 
 Expected: no lint errors.
 
-- [ ] **Step 3: Start local Web server**
+- [x] **Step 3: Start local Web server**
 
 Run: `uvicorn app.main:app --host 127.0.0.1 --port 8000`
 
 Expected: server starts and `/health` returns `{"status":"ok"}`.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add README.md .env.example

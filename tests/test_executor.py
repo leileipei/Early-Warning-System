@@ -366,7 +366,7 @@ def test_execute_rule_by_id_persists_partial_mail_results(monkeypatch, session):
     assert execution_log.error_type == "MailSendError"
     mail_logs = session.exec(select(MailLog).order_by(MailLog.id)).all()
     assert [mail_log.status for mail_log in mail_logs] == [MailStatus.SUCCESS, MailStatus.FAILED]
-    assert [mail_log.subject for mail_log in mail_logs] == ["预警", "预警"]
+    assert [mail_log.subject for mail_log in mail_logs] == ["预警 大额订单", "预警 大额订单"]
     assert mail_logs[0].recipients == "ops@example.com"
     assert mail_logs[1].error_message == "smtp rejected"
 

@@ -26,6 +26,21 @@ router = APIRouter()
 templates = Jinja2Templates(directory=TEMPLATES_DIR)
 
 
+def _template_response(
+    request: Request,
+    template_name: str,
+    context: dict,
+    *,
+    status_code: int = 200,
+):
+    return templates.TemplateResponse(
+        request,
+        template_name,
+        {"request": request, **context},
+        status_code=status_code,
+    )
+
+
 def _is_checked(value: str | None) -> bool:
     return value in {"on", "true", "1"}
 
@@ -75,14 +90,15 @@ def _settings_context(
 
 @router.get("/login", response_class=HTMLResponse)
 def login_page(request: Request):
-    return templates.TemplateResponse("login.html", {"request": request, "title": "登录"})
+    return _template_response(request, "login.html", {"title": "登录"})
 
 
 @router.get("/", response_class=HTMLResponse)
 def dashboard(request: Request, admin: AdminUser = Depends(require_admin)):
-    return templates.TemplateResponse(
+    return _template_response(
+        request,
         "dashboard.html",
-        {"request": request, "admin": admin, "title": "仪表盘"},
+        {"admin": admin, "title": "仪表盘"},
     )
 
 
@@ -93,9 +109,10 @@ def rules_page(
     session: Session = Depends(get_session),
 ):
     rules = session.exec(select(AlertRule).order_by(AlertRule.created_at.desc())).all()
-    return templates.TemplateResponse(
+    return _template_response(
+        request,
         "rules.html",
-        {"request": request, "admin": admin, "title": "预警规则", "rules": rules},
+        {"admin": admin, "title": "预警规则", "rules": rules},
     )
 
 
@@ -105,7 +122,8 @@ def new_rule_page(
     admin: AdminUser = Depends(require_admin),
     session: Session = Depends(get_session),
 ):
-    return templates.TemplateResponse(
+    return _template_response(
+        request,
         "rule_form.html",
         _rule_form_context(request, admin, session),
     )
@@ -149,7 +167,8 @@ def create_rule(
         parsed_send_mode = SendMode(send_mode)
     except (SqlValidationError, ValueError) as exc:
         message = str(exc) or "表单数据无效"
-        return templates.TemplateResponse(
+        return _template_response(
+            request,
             "rule_form.html",
             _rule_form_context(request, admin, session, error=message, form=form),
             status_code=400,
@@ -158,7 +177,8 @@ def create_rule(
     try:
         CronTrigger.from_crontab(cron_expression)
     except ValueError:
-        return templates.TemplateResponse(
+        return _template_response(
+            request,
             "rule_form.html",
             _rule_form_context(request, admin, session, error="Cron 表达式无效", form=form),
             status_code=400,
@@ -167,14 +187,16 @@ def create_rule(
     try:
         source_id = int(data_source_id)
     except ValueError:
-        return templates.TemplateResponse(
+        return _template_response(
+            request,
             "rule_form.html",
             _rule_form_context(request, admin, session, error="请选择有效的数据源", form=form),
             status_code=400,
         )
 
     if session.get(SqlDataSource, source_id) is None:
-        return templates.TemplateResponse(
+        return _template_response(
+            request,
             "rule_form.html",
             _rule_form_context(request, admin, session, error="请选择有效的数据源", form=form),
             status_code=400,
@@ -219,7 +241,8 @@ def settings_page(
     admin: AdminUser = Depends(require_admin),
     session: Session = Depends(get_session),
 ):
-    return templates.TemplateResponse(
+    return _template_response(
+        request,
         "settings.html",
         _settings_context(request, admin, session),
     )
@@ -242,7 +265,8 @@ def create_sql_server_settings(
     _ = admin
     existing = session.exec(select(SqlDataSource).where(SqlDataSource.name == name)).first()
     if existing is not None:
-        return templates.TemplateResponse(
+        return _template_response(
+            request,
             "settings.html",
             _settings_context(request, admin, session, error="数据源名称已存在"),
             status_code=400,
@@ -302,10 +326,10 @@ def logs_page(
 ):
     execution_logs = session.exec(select(ExecutionLog).order_by(ExecutionLog.started_at.desc())).all()
     mail_logs = session.exec(select(MailLog).order_by(MailLog.sent_at.desc())).all()
-    return templates.TemplateResponse(
+    return _template_response(
+        request,
         "logs.html",
         {
-            "request": request,
             "admin": admin,
             "title": "日志",
             "execution_logs": execution_logs,

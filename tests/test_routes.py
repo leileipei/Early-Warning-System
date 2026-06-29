@@ -288,7 +288,11 @@ def test_create_rule_persists_alert_rule(monkeypatch, session):
     data_source = _create_data_source(session)
     client, get_settings, app = _client_with_admin(monkeypatch, session)
     try:
-        response = client.post("/rules", data=_valid_rule_form(data_source.id))
+        response = client.post(
+            "/rules",
+            data=_valid_rule_form(data_source.id),
+            follow_redirects=False,
+        )
 
         assert response.status_code == 303
         assert response.headers["location"] == "/rules"
@@ -478,6 +482,7 @@ def test_create_sql_server_settings_encrypts_password(monkeypatch, session):
                 "enabled": "on",
                 "connect_timeout_seconds": "15",
             },
+            follow_redirects=False,
         )
 
         assert response.status_code == 303
@@ -530,6 +535,7 @@ def test_create_smtp_settings_encrypts_password(monkeypatch, session):
                 "timeout_seconds": "20",
                 "enabled": "on",
             },
+            follow_redirects=False,
         )
 
         assert response.status_code == 303

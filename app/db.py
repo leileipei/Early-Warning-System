@@ -2,6 +2,7 @@ from collections.abc import Generator
 
 from sqlalchemy import event
 from sqlalchemy.engine import Engine
+from sqlalchemy.pool import StaticPool
 from sqlmodel import Session, SQLModel, create_engine
 
 from app.settings import get_settings
@@ -12,7 +13,8 @@ _engine: Engine | None = None
 def create_db_engine(database_url: str | None = None) -> Engine:
     url = database_url or get_settings().database_url
     connect_args = {"check_same_thread": False} if url.startswith("sqlite") else {}
-    engine = create_engine(url, connect_args=connect_args)
+    engine_args = {"poolclass": StaticPool} if url in {"sqlite://", "sqlite:///:memory:"} else {}
+    engine = create_engine(url, connect_args=connect_args, **engine_args)
 
     if url.startswith("sqlite"):
         @event.listens_for(engine, "connect")
