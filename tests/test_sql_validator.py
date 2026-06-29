@@ -22,6 +22,29 @@ def test_allows_comments_without_treating_words_inside_as_sql():
 @pytest.mark.parametrize(
     "sql",
     [
+        "select 'drop' as label",
+        'select "update" as label',
+    ],
+)
+def test_allows_dangerous_words_inside_string_literals(sql):
+    validate_select_sql(sql)
+
+
+@pytest.mark.parametrize(
+    "sql",
+    [
+        "select 1 -- ; delete from x",
+        "select ';' as semicolon",
+        "select 1; -- comment",
+    ],
+)
+def test_allows_semicolons_inside_comments_and_string_literals(sql):
+    validate_select_sql(sql)
+
+
+@pytest.mark.parametrize(
+    "sql",
+    [
         "",
         "   ",
         "values (1)",
@@ -35,6 +58,8 @@ def test_allows_comments_without_treating_words_inside_as_sql():
         "exec dbo.build_warning",
         "execute dbo.build_warning",
         "truncate table orders",
+        "select * into audit_copy from orders",
+        "select * from orders into outfile '/tmp/x'",
         "select * from orders; delete from orders",
         "SELECT * FROM orders WHERE id IN (DELETE)",
         ";select 1",
