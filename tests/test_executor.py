@@ -382,3 +382,21 @@ def test_execute_rule_by_id_persists_failed_log_when_data_source_disabled(sessio
     assert execution_log.error_type == "ConfigurationError"
     assert "数据源" in execution_log.error_message
     assert session.exec(select(MailLog)).all() == []
+
+
+def test_execute_rule_by_id_persists_failed_log_when_builder_raises(monkeypatch, session):
+    data_source = persist_data_source(session)
+    persist_smtp_config(session)
+    rule = persist_rule(session, data_source)
+
+    def raise_builder_error(data_source):
+        raise RuntimeError("cannot decrypt")
+
+    monkeypatch.setattr(execution_service, "build_sql_client", raise_builder_error)
+
+    execution_log = execution_service.execute_rule_by_id(session, rule.id, TriggerType.MANUAL)
+
+    assert execution_log.status == ExecutionStatus.FAILED
+    assert execution_log.error_type == "RuntimeError"
+    assert execution_log.error_message == "cannot decrypt"
+    assert session.exec(select(MailLog)).all() == []

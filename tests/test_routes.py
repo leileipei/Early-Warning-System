@@ -325,6 +325,9 @@ def test_rules_page_lists_existing_rules(monkeypatch, session):
         assert response.status_code == 200
         assert "库存预警" in response.text
         assert "0 8 * * *" in response.text
+        rule = session.exec(select(AlertRule)).one()
+        assert f"/rules/{rule.id}/run" in response.text
+        assert "手动执行" in response.text
     finally:
         app.dependency_overrides.clear()
         get_settings.cache_clear()

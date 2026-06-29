@@ -82,6 +82,12 @@ def execute_rule_by_id(
             error_type="ConfigurationError",
             error_message=str(exc),
         )
+    except Exception as exc:
+        result = ExecutionResult(
+            status=ExecutionStatus.FAILED,
+            error_type=type(exc).__name__,
+            error_message=str(exc) or type(exc).__name__,
+        )
 
     return persist_execution_result(
         session=session,

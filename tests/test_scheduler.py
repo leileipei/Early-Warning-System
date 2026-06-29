@@ -1,7 +1,5 @@
 import importlib
 
-import pytest
-
 from app.models import AlertRule, SendMode
 from app.scheduler import build_scheduler
 
@@ -63,9 +61,16 @@ def test_scheduler_adds_multiple_rules_with_stable_ids():
     assert [list(job.args) for job in jobs] == [[3], [9]]
 
 
-def test_scheduler_raises_for_invalid_cron_expression():
-    with pytest.raises(ValueError):
-        build_scheduler([make_rule(cron_expression="not a cron")], execute_rule=lambda rule_id: None)
+def test_scheduler_skips_invalid_cron_expression():
+    scheduler = build_scheduler(
+        [
+            make_rule(id=1, cron_expression="not a cron"),
+            make_rule(id=2, cron_expression="0 9 * * *"),
+        ],
+        execute_rule=lambda rule_id: None,
+    )
+
+    assert [job.id for job in scheduler.get_jobs()] == ["rule-2"]
 
 
 def test_worker_import_does_not_block():

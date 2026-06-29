@@ -18,6 +18,7 @@
           <th>调度</th>
           <th>状态</th>
           <th>发送方式</th>
+          <th>操作</th>
         </tr>
       </thead>
       <tbody>
@@ -27,10 +28,15 @@
           <td>{{ rule.cron_expression }}</td>
           <td>{{ "启用" if rule.enabled else "停用" }}</td>
           <td>{{ "汇总一封" if rule.send_mode == "summary" else "每行一封" }}</td>
+          <td>
+            <form method="post" action="/rules/{{ rule.id }}/run">
+              <button class="button button-secondary" type="submit">手动执行</button>
+            </form>
+          </td>
         </tr>
         {% else %}
         <tr>
-          <td colspan="4" class="empty-cell">暂无规则</td>
+          <td colspan="5" class="empty-cell">暂无规则</td>
         </tr>
         {% endfor %}
       </tbody>
