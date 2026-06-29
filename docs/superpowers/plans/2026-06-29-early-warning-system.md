@@ -1244,6 +1244,11 @@ def test_rows_from_cursor_returns_dicts():
     assert result == QueryResult(rows=[{"id": 1, "amount": 12000}, {"id": 2, "amount": 15000}])
 ```
 
+Also add adapter tests for ODBC brace escaping of dynamic connection string values,
+`query()` executing CTE/`ORDER BY` SQL without a `TOP` wrapper, row limiting via
+`cursor.fetchmany(max_rows)`, and lazy import behavior that only wraps a missing
+`pyodbc` module.
+
 - [ ] **Step 2: Run tests to verify failure**
 
 Run: `pytest tests/test_sql_client.py -v`
@@ -1256,8 +1261,6 @@ Expected: fail because `app.sql_client` does not exist.
 # app/sql_client.py
 from dataclasses import dataclass
 from typing import Protocol
-
-import pyodbc
 
 
 @dataclass(frozen=True)
@@ -1276,6 +1279,23 @@ def rows_from_cursor(cursor) -> QueryResult:
     return QueryResult(rows=rows)
 
 
+def rows_from_cursor_limited(cursor, max_rows: int) -> QueryResult:
+    columns = [column[0] for column in cursor.description]
+    rows = [dict(zip(columns, row, strict=True)) for row in cursor.fetchmany(max_rows)]
+    return QueryResult(rows=rows)
+
+
+def odbc_brace_escape(value: str) -> str:
+    return "{" + str(value).replace("}", "}}") + "}"
+
+
+def strip_single_trailing_semicolon(sql: str) -> str:
+    stripped_sql = sql.rstrip()
+    if stripped_sql.endswith(";"):
+        return stripped_sql[:-1].rstrip()
+    return stripped_sql
+
+
 class PyodbcSqlServerClient:
     def __init__(
         self,
@@ -1288,22 +1308,32 @@ class PyodbcSqlServerClient:
     ):
         self.connection_string = (
             "DRIVER={ODBC Driver 18 for SQL Server};"
-            f"SERVER={host},{port};"
-            f"DATABASE={database};"
-            f"UID={username};"
-            f"PWD={password};"
+            f"SERVER={odbc_brace_escape(host)},{port};"
+            f"DATABASE={odbc_brace_escape(database)};"
+            f"UID={odbc_brace_escape(username)};"
+            f"PWD={odbc_brace_escape(password)};"
             "Encrypt=yes;"
             "TrustServerCertificate=yes;"
             f"Connection Timeout={connect_timeout_seconds};"
         )
 
     def query(self, sql: str, timeout_seconds: int, max_rows: int) -> QueryResult:
-        limited_sql = f"SELECT TOP ({max_rows}) * FROM ({sql}) AS warning_source"
+        if type(max_rows) is not int or max_rows < 1:
+            raise ValueError("max_rows must be a positive integer")
+
+        try:
+            import pyodbc
+        except ModuleNotFoundError as exc:
+            if exc.name == "pyodbc":
+                raise RuntimeError("pyodbc is required to query SQL Server") from exc
+            raise
+
+        executable_sql = strip_single_trailing_semicolon(sql)
         with pyodbc.connect(self.connection_string) as connection:
             cursor = connection.cursor()
             cursor.timeout = timeout_seconds
-            cursor.execute(limited_sql)
-            return rows_from_cursor(cursor)
+            cursor.execute(executable_sql)
+            return rows_from_cursor_limited(cursor, max_rows)
 ```
 
 - [ ] **Step 4: Run tests**
