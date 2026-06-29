@@ -284,13 +284,15 @@ git commit -m "chore: scaffold FastAPI project"
 ```python
 # tests/conftest.py
 import pytest
-from sqlmodel import Session, SQLModel, create_engine
+from sqlmodel import Session
 
 
 @pytest.fixture()
 def engine():
-    engine = create_engine("sqlite:///:memory:", connect_args={"check_same_thread": False})
-    SQLModel.metadata.create_all(engine)
+    from app.db import create_db_engine, init_db
+
+    engine = create_db_engine("sqlite:///:memory:")
+    init_db(engine)
     return engine
 
 
@@ -302,10 +304,25 @@ def session(engine):
 
 ```python
 # tests/test_db.py
-from app.models import AlertRule, SendMode, SqlDataSource
+import importlib
+import sys
+
+import pytest
+from sqlalchemy import inspect
+from sqlalchemy.exc import IntegrityError
+from sqlmodel import Session, select
+
+from app.models import (
+    AlertRule,
+    ExecutionLog,
+    SendMode,
+    SqlDataSource,
+    TriggerType,
+    utc_now,
+)
 
 
-def test_create_rule_with_sql_server_source(session):
+def _create_rule(session):
     source = SqlDataSource(
         name="prod",
         host="db.example.com",
@@ -333,9 +350,63 @@ def test_create_rule_with_sql_server_source(session):
     session.add(rule)
     session.commit()
     session.refresh(rule)
+    return rule
+
+
+def test_create_rule_with_sql_server_source(session):
+    rule = _create_rule(session)
 
     assert rule.id is not None
     assert rule.send_mode == SendMode.SUMMARY
+
+
+def test_import_db_without_required_secrets(tmp_path, monkeypatch):
+    monkeypatch.delenv("SESSION_SECRET", raising=False)
+    monkeypatch.delenv("SECRET_KEY", raising=False)
+    monkeypatch.chdir(tmp_path)
+    sys.modules.pop("app.db", None)
+
+    imported = importlib.import_module("app.db")
+
+    assert imported is not None
+
+
+def test_init_db_creates_model_tables(engine):
+    table_names = set(inspect(engine).get_table_names())
+
+    assert {
+        "adminuser",
+        "sqldatasource",
+        "smtpconfig",
+        "alertrule",
+        "executionlog",
+        "maillog",
+    } <= table_names
+
+
+def test_sqlite_foreign_keys_are_enforced(session):
+    session.add(ExecutionLog(rule_id=999, trigger_type=TriggerType.MANUAL))
+
+    with pytest.raises(IntegrityError):
+        session.commit()
+
+
+def test_alert_rule_persists_across_new_session(engine, session):
+    rule = _create_rule(session)
+
+    with Session(engine) as new_session:
+        persisted_rule = new_session.exec(
+            select(AlertRule).where(AlertRule.id == rule.id)
+        ).one()
+
+    assert persisted_rule.name == "large orders"
+    assert persisted_rule.send_mode == SendMode.SUMMARY
+
+
+def test_utc_now_returns_naive_utc_datetime():
+    timestamp = utc_now()
+
+    assert timestamp.tzinfo is None
 ```
 
 - [ ] **Step 2: Run the tests to verify they fail**
@@ -346,10 +417,10 @@ Expected: fail because `app.models` does not exist.
 
 - [ ] **Step 3: Implement database models**
 
-Create `app/models.py` with enums and SQLModel tables for:
+Create `app/models.py` with enums and SQLModel tables. Datetimes are stored as naive UTC values in SQLite and interpreted as UTC by the application layer, which avoids pretending SQLite round-trips timezone info.
 
 ```python
-from datetime import datetime, timezone
+from datetime import datetime
 from enum import StrEnum
 from typing import Optional
 
@@ -357,7 +428,7 @@ from sqlmodel import Field, SQLModel
 
 
 def utc_now() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.utcnow()
 
 
 class SendMode(StrEnum):
@@ -467,26 +538,49 @@ class MailLog(SQLModel, table=True):
 # app/db.py
 from collections.abc import Generator
 
+from sqlalchemy import event
+from sqlalchemy.engine import Engine
 from sqlmodel import Session, SQLModel, create_engine
 
 from app.settings import get_settings
 
+_engine: Engine | None = None
 
-def create_db_engine(database_url: str | None = None):
+
+def create_db_engine(database_url: str | None = None) -> Engine:
     url = database_url or get_settings().database_url
     connect_args = {"check_same_thread": False} if url.startswith("sqlite") else {}
-    return create_engine(url, connect_args=connect_args)
+    engine = create_engine(url, connect_args=connect_args)
+
+    if url.startswith("sqlite"):
+        @event.listens_for(engine, "connect")
+        def _enable_sqlite_foreign_keys(dbapi_connection, _connection_record):
+            cursor = dbapi_connection.cursor()
+            try:
+                cursor.execute("PRAGMA foreign_keys=ON")
+            finally:
+                cursor.close()
+
+    return engine
 
 
-engine = create_db_engine()
+def get_engine() -> Engine:
+    global _engine
+
+    if _engine is None:
+        _engine = create_db_engine()
+    return _engine
 
 
-def init_db() -> None:
-    SQLModel.metadata.create_all(engine)
+def init_db(engine: Engine | None = None) -> None:
+    import app.models  # noqa: F401
+
+    target_engine = engine if engine is not None else get_engine()
+    SQLModel.metadata.create_all(target_engine)
 
 
 def get_session() -> Generator[Session, None, None]:
-    with Session(engine) as session:
+    with Session(get_engine()) as session:
         yield session
 ```
 

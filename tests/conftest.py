@@ -1,11 +1,13 @@
 import pytest
-from sqlmodel import Session, SQLModel, create_engine
+from sqlmodel import Session
 
 
 @pytest.fixture()
 def engine():
-    engine = create_engine("sqlite:///:memory:", connect_args={"check_same_thread": False})
-    SQLModel.metadata.create_all(engine)
+    from app.db import create_db_engine, init_db
+
+    engine = create_db_engine("sqlite:///:memory:")
+    init_db(engine)
     return engine
 
 
