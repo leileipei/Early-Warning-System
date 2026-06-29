@@ -42,9 +42,37 @@ def test_render_per_row_uses_current_row():
     assert message.html_body == "金额 30000"
 
 
+def test_subject_renders_as_plain_text_without_html_escape():
+    message = render_per_row(
+        subject_template="预警 {{name}}",
+        body_template="body",
+        row={"name": "A & <B>"},
+        context={},
+    )
+
+    assert message.subject == "预警 A & <B>"
+
+
+def test_body_escapes_regular_template_variables():
+    message = render_summary(
+        subject_template="预警",
+        body_template="<p>{{rule_name}}</p>",
+        rows=[],
+        context={"rule_name": "<b>x</b>"},
+    )
+
+    assert "&lt;b&gt;x&lt;/b&gt;" in message.html_body
+    assert "<p><b>x</b></p>" not in message.html_body
+
+
 def test_missing_field_raises_render_error():
     with pytest.raises(TemplateRenderError):
         render_per_row("订单 {{missing}}", "body", {"id": 1}, {})
+
+
+def test_missing_body_field_raises_render_error():
+    with pytest.raises(TemplateRenderError):
+        render_per_row("订单 {{id}}", "金额 {{missing}}", {"id": 1}, {})
 
 
 def test_summary_table_escapes_header_and_cell_values():

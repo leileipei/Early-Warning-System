@@ -1012,6 +1012,7 @@ from dataclasses import dataclass
 from html import escape
 
 from jinja2 import StrictUndefined, Template, TemplateError
+from markupsafe import Markup
 
 
 class TemplateRenderError(ValueError):
@@ -1024,11 +1025,23 @@ class RenderedMessage:
     html_body: str
 
 
-def _render(template_text: str, context: dict) -> str:
+def _render(template_text: str, context: dict, *, autoescape: bool) -> str:
     try:
-        return Template(template_text, undefined=StrictUndefined, autoescape=True).render(**context)
+        return Template(
+            template_text,
+            undefined=StrictUndefined,
+            autoescape=autoescape,
+        ).render(**context)
     except TemplateError as exc:
         raise TemplateRenderError(str(exc)) from exc
+
+
+def _render_subject(template_text: str, context: dict) -> str:
+    return _render(template_text, context, autoescape=False)
+
+
+def _render_html_body(template_text: str, context: dict) -> str:
+    return _render(template_text, context, autoescape=True)
 
 
 def _table(rows: list[dict]) -> str:
@@ -1049,10 +1062,10 @@ def render_summary(
     rows: list[dict],
     context: dict,
 ) -> RenderedMessage:
-    merged = {**context, "table": _table(rows)}
+    body_context = {**context, "table": Markup(_table(rows))}
     return RenderedMessage(
-        subject=_render(subject_template, merged),
-        html_body=_render(body_template, merged),
+        subject=_render_subject(subject_template, context),
+        html_body=_render_html_body(body_template, body_context),
     )
 
 
@@ -1064,8 +1077,8 @@ def render_per_row(
 ) -> RenderedMessage:
     merged = {**context, **row}
     return RenderedMessage(
-        subject=_render(subject_template, merged),
-        html_body=_render(body_template, merged),
+        subject=_render_subject(subject_template, merged),
+        html_body=_render_html_body(body_template, merged),
     )
 ```
 
