@@ -4,9 +4,10 @@ from fastapi.templating import Jinja2Templates
 
 from app.auth import require_admin
 from app.models import AdminUser
+from app.paths import TEMPLATES_DIR
 
 router = APIRouter()
-templates = Jinja2Templates(directory="app/templates")
+templates = Jinja2Templates(directory=TEMPLATES_DIR)
 
 
 @router.get("/login", response_class=HTMLResponse)

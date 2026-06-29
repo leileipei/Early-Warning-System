@@ -182,3 +182,18 @@ def test_static_stylesheet_is_mounted(monkeypatch):
         assert "text/css" in response.headers["content-type"]
     finally:
         get_settings.cache_clear()
+
+
+def test_static_stylesheet_is_mounted_from_other_cwd(tmp_path, monkeypatch):
+    _set_required_settings(monkeypatch)
+    monkeypatch.chdir(tmp_path)
+    create_app, get_settings = _load_create_app()
+    try:
+        client = TestClient(create_app())
+
+        response = client.get("/static/styles.css")
+
+        assert response.status_code == 200
+        assert "text/css" in response.headers["content-type"]
+    finally:
+        get_settings.cache_clear()
