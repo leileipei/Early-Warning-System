@@ -245,6 +245,24 @@ def test_login_page_renders(monkeypatch):
         get_settings.cache_clear()
 
 
+def test_dashboard_redirects_browser_to_login_when_unauthenticated(monkeypatch):
+    _set_required_settings(monkeypatch)
+    create_app, get_settings = _load_create_app()
+    try:
+        client = TestClient(create_app())
+
+        response = client.get(
+            "/",
+            headers={"accept": "text/html"},
+            follow_redirects=False,
+        )
+
+        assert response.status_code == 303
+        assert response.headers["location"] == "/login"
+    finally:
+        get_settings.cache_clear()
+
+
 def test_rules_page_requires_login(monkeypatch):
     _set_required_settings(monkeypatch)
     create_app, get_settings = _load_create_app()
