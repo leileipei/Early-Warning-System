@@ -58,6 +58,7 @@
             <th>主机</th>
             <th>数据库</th>
             <th>状态</th>
+            <th>操作</th>
           </tr>
         </thead>
         <tbody>
@@ -67,10 +68,13 @@
             <td>{{ data_source.host }}:{{ data_source.port }}</td>
             <td>{{ data_source.database }}</td>
             <td>{{ "启用" if data_source.enabled else "停用" }}</td>
+            <td>
+              <a class="button button-secondary" href="/settings/sql-server/{{ data_source.id }}/edit">编辑</a>
+            </td>
           </tr>
           {% else %}
           <tr>
-            <td colspan="4" class="empty-cell">暂无数据源</td>
+            <td colspan="5" class="empty-cell">暂无数据源</td>
           </tr>
           {% endfor %}
         </tbody>

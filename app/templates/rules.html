@@ -29,6 +29,7 @@
           <td>{{ "启用" if rule.enabled else "停用" }}</td>
           <td>{{ "汇总一封" if rule.send_mode == "summary" else "每行一封" }}</td>
           <td>
+            <a class="button button-secondary" href="/rules/{{ rule.id }}/edit">编辑</a>
             <form method="post" action="/rules/{{ rule.id }}/run">
               <button class="button button-secondary" type="submit">手动执行</button>
             </form>

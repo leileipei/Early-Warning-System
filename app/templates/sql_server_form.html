@@ -1,0 +1,55 @@
+{% extends "base.html" %}
+
+{% block content %}
+<section class="page-header">
+  <div>
+    <p class="eyebrow">SQL Server</p>
+    <h1>编辑数据源</h1>
+  </div>
+  <a class="button button-secondary" href="/settings">返回</a>
+</section>
+
+<section class="panel">
+  {% if error %}
+  <p class="form-error">{{ error }}</p>
+  {% endif %}
+  <form class="stacked-form" method="post" action="{{ action }}">
+    <label>
+      <span>名称</span>
+      <input name="name" value="{{ form.get('name', '') }}" required>
+    </label>
+    <label>
+      <span>主机</span>
+      <input name="host" value="{{ form.get('host', '') }}" required>
+    </label>
+    <label>
+      <span>端口</span>
+      <input name="port" type="number" value="{{ form.get('port', '1433') }}" required>
+    </label>
+    <label>
+      <span>数据库</span>
+      <input name="database" value="{{ form.get('database', '') }}" required>
+    </label>
+    <label>
+      <span>用户名</span>
+      <input name="username" value="{{ form.get('username', '') }}" required>
+    </label>
+    <label>
+      <span>密码</span>
+      <input name="password" type="password" placeholder="留空则不修改">
+    </label>
+    <label>
+      <span>连接超时（秒）</span>
+      <input name="connect_timeout_seconds" type="number" value="{{ form.get('connect_timeout_seconds', '10') }}" min="1">
+    </label>
+    <label>
+      <span>启用</span>
+      <input name="enabled" type="checkbox" {% if form.get('enabled') %}checked{% endif %}>
+    </label>
+    <div class="button-row">
+      <button class="button" type="submit">保存</button>
+      <a class="button button-secondary" href="/settings">取消</a>
+    </div>
+  </form>
+</section>
+{% endblock %}

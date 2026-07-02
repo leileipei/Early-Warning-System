@@ -4,7 +4,7 @@
 <section class="page-header">
   <div>
     <p class="eyebrow">规则</p>
-    <h1>新建规则</h1>
+    <h1>{{ heading }}</h1>
   </div>
   <a class="button button-secondary" href="/rules">返回</a>
 </section>
@@ -13,7 +13,7 @@
   {% if error %}
   <p class="form-error">{{ error }}</p>
   {% endif %}
-  <form class="stacked-form" method="post" action="/rules">
+  <form class="stacked-form" method="post" action="{{ action }}">
     <label>
       <span>规则名称</span>
       <input name="name" value="{{ form.get('name', '') }}" placeholder="例如：库存低水位预警" required>

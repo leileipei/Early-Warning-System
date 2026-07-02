@@ -349,6 +349,7 @@ def test_rules_page_lists_existing_rules(monkeypatch, session):
         assert "0 8 * * *" in response.text
         rule = session.exec(select(AlertRule)).one()
         assert f"/rules/{rule.id}/run" in response.text
+        assert f"/rules/{rule.id}/edit" in response.text
         assert "手动执行" in response.text
     finally:
         app.dependency_overrides.clear()
@@ -364,6 +365,78 @@ def test_new_rule_page_lists_data_sources(monkeypatch, session):
         assert response.status_code == 200
         assert "生产库" in response.text
         assert "data_source_id" in response.text
+    finally:
+        app.dependency_overrides.clear()
+        get_settings.cache_clear()
+
+
+def test_edit_rule_page_prefills_existing_rule(monkeypatch, session):
+    data_source = _create_data_source(session)
+    rule = _create_rule(session, data_source, name="库存预警", sql_text="select id from stock")
+    client, get_settings, app = _client_with_admin(monkeypatch, session)
+    try:
+        response = client.get(f"/rules/{rule.id}/edit")
+
+        assert response.status_code == 200
+        assert "编辑规则" in response.text
+        assert "库存预警" in response.text
+        assert "select id from stock" in response.text
+        assert f'action="/rules/{rule.id}"' in response.text
+    finally:
+        app.dependency_overrides.clear()
+        get_settings.cache_clear()
+
+
+def test_update_rule_persists_changes(monkeypatch, session):
+    data_source = _create_data_source(session)
+    other_source = SqlDataSource(
+        name="备库",
+        host="backup.example.com",
+        port=1433,
+        database="erp_backup",
+        username="readonly",
+        encrypted_password="encrypted",
+        enabled=True,
+    )
+    session.add(other_source)
+    session.commit()
+    session.refresh(other_source)
+    rule = _create_rule(session, data_source)
+    form_data = _valid_rule_form(other_source.id)
+    form_data.update(
+        {
+            "name": "更新后的规则",
+            "sql_text": "select id from updated_orders",
+            "cron_expression": "30 8 * * 1-5",
+            "recipients": "owner@example.com",
+            "cc_recipients": "team@example.com",
+            "subject_template": "更新主题",
+            "body_template": "更新正文 {{table}}",
+            "send_mode": "per_row",
+            "query_timeout_seconds": "45",
+            "max_rows": "100",
+        }
+    )
+    form_data.pop("enabled")
+    client, get_settings, app = _client_with_admin(monkeypatch, session)
+    try:
+        response = client.post(f"/rules/{rule.id}", data=form_data, follow_redirects=False)
+
+        assert response.status_code == 303
+        assert response.headers["location"] == "/rules"
+        session.refresh(rule)
+        assert rule.name == "更新后的规则"
+        assert rule.data_source_id == other_source.id
+        assert rule.sql_text == "select id from updated_orders"
+        assert rule.cron_expression == "30 8 * * 1-5"
+        assert rule.recipients == "owner@example.com"
+        assert rule.cc_recipients == "team@example.com"
+        assert rule.subject_template == "更新主题"
+        assert rule.body_template == "更新正文 {{table}}"
+        assert rule.send_mode == SendMode.PER_ROW
+        assert rule.query_timeout_seconds == 45
+        assert rule.max_rows == 100
+        assert rule.enabled is False
     finally:
         app.dependency_overrides.clear()
         get_settings.cache_clear()
@@ -465,8 +538,92 @@ def test_settings_page_lists_data_sources_and_smtp_configs(monkeypatch, session)
 
         assert response.status_code == 200
         assert "生产库" in response.text
+        data_source = session.exec(select(SqlDataSource)).one()
+        assert f"/settings/sql-server/{data_source.id}/edit" in response.text
         assert "smtp.example.com" in response.text
         assert "encrypted" not in response.text
+    finally:
+        app.dependency_overrides.clear()
+        get_settings.cache_clear()
+
+
+def test_edit_sql_server_settings_page_prefills_existing_data_source(monkeypatch, session):
+    data_source = _create_data_source(session)
+    client, get_settings, app = _client_with_admin(monkeypatch, session)
+    try:
+        response = client.get(f"/settings/sql-server/{data_source.id}/edit")
+
+        assert response.status_code == 200
+        assert "编辑数据源" in response.text
+        assert "生产库" in response.text
+        assert "db.example.com" in response.text
+        assert "readonly" in response.text
+        assert "encrypted" not in response.text
+        assert f'action="/settings/sql-server/{data_source.id}"' in response.text
+    finally:
+        app.dependency_overrides.clear()
+        get_settings.cache_clear()
+
+
+def test_update_sql_server_settings_preserves_password_when_blank(monkeypatch, session):
+    data_source = _create_data_source(session)
+    original_encrypted_password = data_source.encrypted_password
+    client, get_settings, app = _client_with_admin(monkeypatch, session)
+    try:
+        response = client.post(
+            f"/settings/sql-server/{data_source.id}",
+            data={
+                "name": "生产库更新",
+                "host": "new-db.example.com",
+                "port": "14330",
+                "database": "erp2",
+                "username": "readonly2",
+                "password": "",
+                "enabled": "",
+                "connect_timeout_seconds": "25",
+            },
+            follow_redirects=False,
+        )
+
+        assert response.status_code == 303
+        assert response.headers["location"] == "/settings"
+        session.refresh(data_source)
+        assert data_source.name == "生产库更新"
+        assert data_source.host == "new-db.example.com"
+        assert data_source.port == 14330
+        assert data_source.database == "erp2"
+        assert data_source.username == "readonly2"
+        assert data_source.encrypted_password == original_encrypted_password
+        assert data_source.enabled is False
+        assert data_source.connect_timeout_seconds == 25
+    finally:
+        app.dependency_overrides.clear()
+        get_settings.cache_clear()
+
+
+def test_update_sql_server_settings_replaces_password_when_provided(monkeypatch, session):
+    data_source = _create_data_source(session)
+    original_encrypted_password = data_source.encrypted_password
+    client, get_settings, app = _client_with_admin(monkeypatch, session)
+    try:
+        response = client.post(
+            f"/settings/sql-server/{data_source.id}",
+            data={
+                "name": "生产库",
+                "host": "db.example.com",
+                "port": "1433",
+                "database": "erp",
+                "username": "readonly",
+                "password": "new-password",
+                "enabled": "on",
+                "connect_timeout_seconds": "10",
+            },
+            follow_redirects=False,
+        )
+
+        assert response.status_code == 303
+        session.refresh(data_source)
+        assert data_source.encrypted_password != original_encrypted_password
     finally:
         app.dependency_overrides.clear()
         get_settings.cache_clear()
