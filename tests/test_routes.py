@@ -17,6 +17,7 @@ from app.models import (
     SqlDataSource,
     TriggerType,
 )
+from app.sql_client import QueryResult
 
 VALID_FERNET_KEY = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
 
@@ -385,25 +386,115 @@ def test_new_rule_page_renders_sql_check_button(monkeypatch, session):
         get_settings.cache_clear()
 
 
-def test_validate_rule_sql_accepts_select_sql(monkeypatch, session):
+class FakeSyntaxSqlClient:
+    def __init__(self, error=None):
+        self.error = error
+        self.checked_sql = None
+        self.timeout_seconds = None
+
+    def query(self, sql, timeout_seconds, max_rows):
+        return QueryResult(rows=[])
+
+    def validate_syntax(self, sql, timeout_seconds):
+        self.checked_sql = sql
+        self.timeout_seconds = timeout_seconds
+        if self.error is not None:
+            raise self.error
+
+
+def test_validate_rule_sql_accepts_sql_server_syntax(monkeypatch, session):
+    data_source = _create_data_source(session)
+    fake_client = FakeSyntaxSqlClient()
+    routes = importlib.import_module("app.routes")
+    monkeypatch.setattr(routes, "build_sql_client", lambda source: fake_client)
     client, get_settings, app = _client_with_admin(monkeypatch, session)
     try:
-        response = client.post("/rules/validate-sql", data={"sql_text": "select id from orders"})
+        response = client.post(
+            "/rules/validate-sql",
+            data={"data_source_id": str(data_source.id), "sql_text": "select id from orders"},
+        )
 
         assert response.status_code == 200
-        assert response.json() == {"valid": True, "message": "SQL 检测通过"}
+        assert response.json() == {"valid": True, "message": "SQL Server 语法检测通过"}
+        assert fake_client.checked_sql == "select id from orders"
+        assert fake_client.timeout_seconds == data_source.connect_timeout_seconds
     finally:
         app.dependency_overrides.clear()
         get_settings.cache_clear()
 
 
-def test_validate_rule_sql_rejects_invalid_sql(monkeypatch, session):
+def test_validate_rule_sql_rejects_invalid_sql_before_connecting(monkeypatch, session):
+    data_source = _create_data_source(session)
+    routes = importlib.import_module("app.routes")
+    monkeypatch.setattr(
+        routes,
+        "build_sql_client",
+        lambda source: pytest.fail("should not connect when safety validation fails"),
+    )
     client, get_settings, app = _client_with_admin(monkeypatch, session)
     try:
-        response = client.post("/rules/validate-sql", data={"sql_text": "delete from orders"})
+        response = client.post(
+            "/rules/validate-sql",
+            data={"data_source_id": str(data_source.id), "sql_text": "delete from orders"},
+        )
 
         assert response.status_code == 400
         assert response.json() == {"valid": False, "message": "只允许 SELECT 查询"}
+    finally:
+        app.dependency_overrides.clear()
+        get_settings.cache_clear()
+
+
+def test_validate_rule_sql_requires_data_source(monkeypatch, session):
+    client, get_settings, app = _client_with_admin(monkeypatch, session)
+    try:
+        response = client.post(
+            "/rules/validate-sql",
+            data={"data_source_id": "", "sql_text": "select id from orders"},
+        )
+
+        assert response.status_code == 400
+        assert response.json() == {"valid": False, "message": "请先选择数据源"}
+    finally:
+        app.dependency_overrides.clear()
+        get_settings.cache_clear()
+
+
+def test_validate_rule_sql_rejects_missing_data_source(monkeypatch, session):
+    client, get_settings, app = _client_with_admin(monkeypatch, session)
+    try:
+        response = client.post(
+            "/rules/validate-sql",
+            data={"data_source_id": "999", "sql_text": "select id from orders"},
+        )
+
+        assert response.status_code == 400
+        assert response.json() == {"valid": False, "message": "请选择有效的数据源"}
+    finally:
+        app.dependency_overrides.clear()
+        get_settings.cache_clear()
+
+
+def test_validate_rule_sql_returns_sql_server_syntax_error(monkeypatch, session):
+    data_source = _create_data_source(session)
+    routes = importlib.import_module("app.routes")
+    monkeypatch.setattr(
+        routes,
+        "build_sql_client",
+        lambda source: FakeSyntaxSqlClient(error=RuntimeError("Incorrect syntax near 'from'")),
+    )
+    client, get_settings, app = _client_with_admin(monkeypatch, session)
+    try:
+        response = client.post(
+            "/rules/validate-sql",
+            data={"data_source_id": str(data_source.id), "sql_text": "select from orders"},
+        )
+
+        assert response.status_code == 400
+        assert response.json() == {
+            "valid": False,
+            "message": "SQL Server 语法检测失败：Incorrect syntax near 'from'",
+        }
     finally:
         app.dependency_overrides.clear()
         get_settings.cache_clear()

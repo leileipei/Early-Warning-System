@@ -7,7 +7,7 @@ from sqlmodel import Session, select
 from app.auth import require_admin
 from app.crypto import SecretCipher
 from app.db import get_session
-from app.execution_service import execute_rule_by_id
+from app.execution_service import build_sql_client, execute_rule_by_id
 from app.models import (
     AdminUser,
     AlertRule,
@@ -379,10 +379,18 @@ def create_rule(
 
 @router.post("/rules/validate-sql")
 def validate_rule_sql(
+    data_source_id: str = Form(""),
     sql_text: str = Form(""),
     admin: AdminUser = Depends(require_admin),
+    session: Session = Depends(get_session),
 ):
     _ = admin
+    if not data_source_id:
+        return JSONResponse(
+            {"valid": False, "message": "请先选择数据源"},
+            status_code=400,
+        )
+
     try:
         validate_select_only_sql(sql_text)
     except SqlValidationError as exc:
@@ -390,7 +398,34 @@ def validate_rule_sql(
             {"valid": False, "message": str(exc)},
             status_code=400,
         )
-    return {"valid": True, "message": "SQL 检测通过"}
+
+    try:
+        source_id = int(data_source_id)
+    except ValueError:
+        return JSONResponse(
+            {"valid": False, "message": "请选择有效的数据源"},
+            status_code=400,
+        )
+
+    data_source = session.get(SqlDataSource, source_id)
+    if data_source is None:
+        return JSONResponse(
+            {"valid": False, "message": "请选择有效的数据源"},
+            status_code=400,
+        )
+
+    try:
+        build_sql_client(data_source).validate_syntax(
+            sql_text,
+            timeout_seconds=data_source.connect_timeout_seconds,
+        )
+    except Exception as exc:
+        return JSONResponse(
+            {"valid": False, "message": f"SQL Server 语法检测失败：{exc}"},
+            status_code=400,
+        )
+
+    return {"valid": True, "message": "SQL Server 语法检测通过"}
 
 
 @router.get("/rules/{rule_id}/edit", response_class=HTMLResponse)

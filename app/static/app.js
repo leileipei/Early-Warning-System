@@ -4,6 +4,7 @@ document.addEventListener("DOMContentLoaded", () => {
       const form = button.closest("form");
       const endpoint = button.dataset.endpoint;
       const sqlInput = form?.querySelector("[data-sql-input]");
+      const dataSourceInput = form?.querySelector('[name="data_source_id"]');
       const result = form?.querySelector("[data-sql-check-result]");
       if (!endpoint || !sqlInput || !result) {
         return;
@@ -15,6 +16,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
       const payload = new FormData();
       payload.append("sql_text", sqlInput.value);
+      payload.append("data_source_id", dataSourceInput?.value || "");
 
       try {
         const response = await fetch(endpoint, {

@@ -173,6 +173,26 @@ def test_query_preserves_cte_and_order_by_and_strips_trailing_semicolon(
     assert cursor.max_rows == 25
 
 
+def test_validate_syntax_asks_sql_server_to_parse_without_executing(monkeypatch):
+    cursor = FakePyodbcCursor()
+    fake_pyodbc = FakePyodbc(FakePyodbcConnection(cursor))
+    monkeypatch.setitem(sys.modules, "pyodbc", fake_pyodbc)
+    client = PyodbcSqlServerClient(
+        host="db.example.internal",
+        port=1433,
+        database="warnings",
+        username="warning_user",
+        password="secret",
+        connect_timeout_seconds=5,
+    )
+
+    client.validate_syntax("select id from orders;  \n", timeout_seconds=9)
+
+    assert fake_pyodbc.connection_string == client.connection_string
+    assert cursor.timeout == 9
+    assert cursor.executed_sql == "SET PARSEONLY ON;\nselect id from orders;\nSET PARSEONLY OFF;"
+
+
 @pytest.mark.parametrize("max_rows", [0, -1, 1.5, "25"])
 def test_query_rejects_invalid_max_rows_before_connecting(monkeypatch, max_rows):
     fake_pyodbc = FakePyodbc(FakePyodbcConnection(FakePyodbcCursor()))

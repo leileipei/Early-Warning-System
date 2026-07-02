@@ -11,6 +11,9 @@ class SqlClient(Protocol):
     def query(self, sql: str, timeout_seconds: int, max_rows: int) -> QueryResult:
         raise NotImplementedError
 
+    def validate_syntax(self, sql: str, timeout_seconds: int) -> None:
+        raise NotImplementedError
+
 
 def rows_from_cursor(cursor) -> QueryResult:
     columns = [column[0] for column in cursor.description]
@@ -90,3 +93,18 @@ class PyodbcSqlServerClient:
             cursor.timeout = timeout_seconds
             cursor.execute(executable_sql)
             return rows_from_cursor_limited(cursor, max_rows)
+
+    def validate_syntax(self, sql: str, timeout_seconds: int) -> None:
+        try:
+            import pyodbc
+        except ModuleNotFoundError as exc:
+            if exc.name == "pyodbc":
+                raise RuntimeError("pyodbc is required to query SQL Server") from exc
+            raise
+
+        executable_sql = strip_single_trailing_semicolon(sql)
+        parse_only_batch = f"SET PARSEONLY ON;\n{executable_sql};\nSET PARSEONLY OFF;"
+        with pyodbc.connect(self.connection_string) as connection:
+            cursor = connection.cursor()
+            cursor.timeout = timeout_seconds
+            cursor.execute(parse_only_batch)
