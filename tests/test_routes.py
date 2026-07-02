@@ -370,6 +370,58 @@ def test_new_rule_page_lists_data_sources(monkeypatch, session):
         get_settings.cache_clear()
 
 
+def test_new_rule_page_renders_sql_check_button(monkeypatch, session):
+    _create_data_source(session)
+    client, get_settings, app = _client_with_admin(monkeypatch, session)
+    try:
+        response = client.get("/rules/new")
+
+        assert response.status_code == 200
+        assert "检测 SQL" in response.text
+        assert 'data-sql-check-button' in response.text
+        assert 'data-endpoint="/rules/validate-sql"' in response.text
+    finally:
+        app.dependency_overrides.clear()
+        get_settings.cache_clear()
+
+
+def test_validate_rule_sql_accepts_select_sql(monkeypatch, session):
+    client, get_settings, app = _client_with_admin(monkeypatch, session)
+    try:
+        response = client.post("/rules/validate-sql", data={"sql_text": "select id from orders"})
+
+        assert response.status_code == 200
+        assert response.json() == {"valid": True, "message": "SQL 检测通过"}
+    finally:
+        app.dependency_overrides.clear()
+        get_settings.cache_clear()
+
+
+def test_validate_rule_sql_rejects_invalid_sql(monkeypatch, session):
+    client, get_settings, app = _client_with_admin(monkeypatch, session)
+    try:
+        response = client.post("/rules/validate-sql", data={"sql_text": "delete from orders"})
+
+        assert response.status_code == 400
+        assert response.json() == {"valid": False, "message": "只允许 SELECT 查询"}
+    finally:
+        app.dependency_overrides.clear()
+        get_settings.cache_clear()
+
+
+def test_validate_rule_sql_requires_admin_session(monkeypatch):
+    _set_required_settings(monkeypatch)
+    create_app, get_settings = _load_create_app()
+    try:
+        client = TestClient(create_app())
+
+        response = client.post("/rules/validate-sql", data={"sql_text": "select 1"})
+
+        assert response.status_code == 401
+    finally:
+        get_settings.cache_clear()
+
+
 def test_edit_rule_page_prefills_existing_rule(monkeypatch, session):
     data_source = _create_data_source(session)
     rule = _create_rule(session, data_source, name="库存预警", sql_text="select id from stock")

@@ -222,6 +222,28 @@ button:hover {
   align-items: center;
 }
 
+.sql-check-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+  margin-top: -6px;
+}
+
+.field-feedback {
+  color: #667085;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.field-feedback.is-success {
+  color: #067647;
+}
+
+.field-feedback.is-error {
+  color: #b42318;
+}
+
 .table-shell {
   overflow-x: auto;
 }

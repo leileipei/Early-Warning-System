@@ -1,6 +1,6 @@
 from apscheduler.triggers.cron import CronTrigger
 from fastapi import APIRouter, Depends, Form, HTTPException, Request
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from sqlmodel import Session, select
 
@@ -375,6 +375,22 @@ def create_rule(
     session.add(rule)
     session.commit()
     return RedirectResponse("/rules", status_code=303)
+
+
+@router.post("/rules/validate-sql")
+def validate_rule_sql(
+    sql_text: str = Form(""),
+    admin: AdminUser = Depends(require_admin),
+):
+    _ = admin
+    try:
+        validate_select_only_sql(sql_text)
+    except SqlValidationError as exc:
+        return JSONResponse(
+            {"valid": False, "message": str(exc)},
+            status_code=400,
+        )
+    return {"valid": True, "message": "SQL 检测通过"}
 
 
 @router.get("/rules/{rule_id}/edit", response_class=HTMLResponse)
