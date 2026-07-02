@@ -43,6 +43,35 @@
       <input name="connect_timeout_seconds" type="number" value="{{ form.get('connect_timeout_seconds', '10') }}" min="1">
     </label>
     <label>
+      <span>ODBC 驱动</span>
+      <input name="odbc_driver" value="{{ form.get('odbc_driver', 'ODBC Driver 18 for SQL Server') }}" required>
+    </label>
+    <label>
+      <span>服务器地址覆盖值</span>
+      <input name="server_override" value="{{ form.get('server_override', '') }}" placeholder="可选，例如 SERVER\INSTANCE 或 192.168.1.10,1433">
+    </label>
+    <div class="form-row">
+      <label>
+        <span>Encrypt</span>
+        <select name="encrypt">
+          <option value="yes" {% if form.get('encrypt', 'yes') == 'yes' %}selected{% endif %}>yes</option>
+          <option value="no" {% if form.get('encrypt') == 'no' %}selected{% endif %}>no</option>
+          <option value="optional" {% if form.get('encrypt') == 'optional' %}selected{% endif %}>optional</option>
+        </select>
+      </label>
+      <label>
+        <span>TrustServerCertificate</span>
+        <select name="trust_server_certificate">
+          <option value="yes" {% if form.get('trust_server_certificate', 'yes') == 'yes' %}selected{% endif %}>yes</option>
+          <option value="no" {% if form.get('trust_server_certificate') == 'no' %}selected{% endif %}>no</option>
+        </select>
+      </label>
+    </div>
+    <label>
+      <span>额外连接参数</span>
+      <input name="extra_params" value="{{ form.get('extra_params', '') }}" placeholder="例如 ApplicationIntent=ReadOnly;MultiSubnetFailover=Yes;">
+    </label>
+    <label>
       <span>启用</span>
       <input name="enabled" type="checkbox" {% if form.get('enabled') %}checked{% endif %}>
     </label>

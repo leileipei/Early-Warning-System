@@ -581,6 +581,11 @@ def test_update_sql_server_settings_preserves_password_when_blank(monkeypatch, s
                 "password": "",
                 "enabled": "",
                 "connect_timeout_seconds": "25",
+                "odbc_driver": "ODBC Driver 17 for SQL Server",
+                "server_override": "new-db.example.com,14330",
+                "encrypt": "no",
+                "trust_server_certificate": "yes",
+                "extra_params": "MultiSubnetFailover=Yes;",
             },
             follow_redirects=False,
         )
@@ -596,6 +601,11 @@ def test_update_sql_server_settings_preserves_password_when_blank(monkeypatch, s
         assert data_source.encrypted_password == original_encrypted_password
         assert data_source.enabled is False
         assert data_source.connect_timeout_seconds == 25
+        assert data_source.odbc_driver == "ODBC Driver 17 for SQL Server"
+        assert data_source.server_override == "new-db.example.com,14330"
+        assert data_source.encrypt == "no"
+        assert data_source.trust_server_certificate == "yes"
+        assert data_source.extra_params == "MultiSubnetFailover=Yes;"
     finally:
         app.dependency_overrides.clear()
         get_settings.cache_clear()
@@ -656,6 +666,11 @@ def test_create_sql_server_settings_encrypts_password(monkeypatch, session):
                 "password": "plain-password",
                 "enabled": "on",
                 "connect_timeout_seconds": "15",
+                "odbc_driver": "ODBC Driver 17 for SQL Server",
+                "server_override": r"db.example.com\\REPORTING",
+                "encrypt": "optional",
+                "trust_server_certificate": "no",
+                "extra_params": "ApplicationIntent=ReadOnly;",
             },
             follow_redirects=False,
         )
@@ -664,6 +679,11 @@ def test_create_sql_server_settings_encrypts_password(monkeypatch, session):
         data_source = session.exec(select(SqlDataSource)).one()
         assert data_source.encrypted_password != "plain-password"
         assert data_source.connect_timeout_seconds == 15
+        assert data_source.odbc_driver == "ODBC Driver 17 for SQL Server"
+        assert data_source.server_override == r"db.example.com\\REPORTING"
+        assert data_source.encrypt == "optional"
+        assert data_source.trust_server_certificate == "no"
+        assert data_source.extra_params == "ApplicationIntent=ReadOnly;"
     finally:
         app.dependency_overrides.clear()
         get_settings.cache_clear()

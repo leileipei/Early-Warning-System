@@ -234,6 +234,11 @@ def _data_source_to_form(data_source: SqlDataSource) -> dict[str, str]:
         "password": "",
         "enabled": "on" if data_source.enabled else "",
         "connect_timeout_seconds": str(data_source.connect_timeout_seconds),
+        "odbc_driver": data_source.odbc_driver,
+        "server_override": data_source.server_override,
+        "encrypt": data_source.encrypt,
+        "trust_server_certificate": data_source.trust_server_certificate,
+        "extra_params": data_source.extra_params,
     }
 
 
@@ -246,6 +251,11 @@ def _submitted_data_source_form(
     password: str,
     enabled: str | None,
     connect_timeout_seconds: int,
+    odbc_driver: str,
+    server_override: str,
+    encrypt: str,
+    trust_server_certificate: str,
+    extra_params: str,
 ) -> dict[str, str]:
     return {
         "name": name,
@@ -256,6 +266,11 @@ def _submitted_data_source_form(
         "password": password,
         "enabled": "on" if _is_checked(enabled) else "",
         "connect_timeout_seconds": str(connect_timeout_seconds),
+        "odbc_driver": odbc_driver,
+        "server_override": server_override,
+        "encrypt": encrypt,
+        "trust_server_certificate": trust_server_certificate,
+        "extra_params": extra_params,
     }
 
 
@@ -490,6 +505,11 @@ def create_sql_server_settings(
     password: str = Form(""),
     enabled: str | None = Form(None),
     connect_timeout_seconds: int = Form(10),
+    odbc_driver: str = Form("ODBC Driver 18 for SQL Server"),
+    server_override: str = Form(""),
+    encrypt: str = Form("yes"),
+    trust_server_certificate: str = Form("yes"),
+    extra_params: str = Form(""),
     admin: AdminUser = Depends(require_admin),
     session: Session = Depends(get_session),
 ):
@@ -512,6 +532,11 @@ def create_sql_server_settings(
         encrypted_password=_cipher().encrypt(password),
         enabled=_is_checked(enabled),
         connect_timeout_seconds=connect_timeout_seconds,
+        odbc_driver=odbc_driver,
+        server_override=server_override,
+        encrypt=encrypt,
+        trust_server_certificate=trust_server_certificate,
+        extra_params=extra_params,
     )
     session.add(data_source)
     session.commit()
@@ -553,6 +578,11 @@ def update_sql_server_settings(
     password: str = Form(""),
     enabled: str | None = Form(None),
     connect_timeout_seconds: int = Form(10),
+    odbc_driver: str = Form("ODBC Driver 18 for SQL Server"),
+    server_override: str = Form(""),
+    encrypt: str = Form("yes"),
+    trust_server_certificate: str = Form("yes"),
+    extra_params: str = Form(""),
     admin: AdminUser = Depends(require_admin),
     session: Session = Depends(get_session),
 ):
@@ -569,6 +599,11 @@ def update_sql_server_settings(
         password,
         enabled,
         connect_timeout_seconds,
+        odbc_driver,
+        server_override,
+        encrypt,
+        trust_server_certificate,
+        extra_params,
     )
     existing = session.exec(select(SqlDataSource).where(SqlDataSource.name == name)).first()
     if existing is not None and existing.id != data_source.id:
@@ -594,6 +629,11 @@ def update_sql_server_settings(
         data_source.encrypted_password = _cipher().encrypt(password)
     data_source.enabled = _is_checked(enabled)
     data_source.connect_timeout_seconds = connect_timeout_seconds
+    data_source.odbc_driver = odbc_driver
+    data_source.server_override = server_override
+    data_source.encrypt = encrypt
+    data_source.trust_server_certificate = trust_server_certificate
+    data_source.extra_params = extra_params
     data_source.updated_at = utc_now()
     session.add(data_source)
     session.commit()

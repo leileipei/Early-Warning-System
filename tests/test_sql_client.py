@@ -39,6 +39,30 @@ def test_pyodbc_sql_server_client_builds_connection_string():
     assert "Connection Timeout=5;" in client.connection_string
 
 
+def test_pyodbc_sql_server_client_supports_advanced_connection_options():
+    client = PyodbcSqlServerClient(
+        host="db.example.internal",
+        port=1433,
+        database="warnings",
+        username="warning_user",
+        password="secret",
+        connect_timeout_seconds=5,
+        odbc_driver="ODBC Driver 17 for SQL Server",
+        server_override=r"db.example.internal\\REPORTING",
+        encrypt="optional",
+        trust_server_certificate="no",
+        extra_params="ApplicationIntent=ReadOnly; MultiSubnetFailover=Yes; ",
+    )
+
+    assert "DRIVER={ODBC Driver 17 for SQL Server};" in client.connection_string
+    assert r"SERVER={db.example.internal\\REPORTING};" in client.connection_string
+    assert "Encrypt=optional;" in client.connection_string
+    assert "TrustServerCertificate=no;" in client.connection_string
+    assert "ApplicationIntent=ReadOnly;" in client.connection_string
+    assert "MultiSubnetFailover=Yes;" in client.connection_string
+    assert "SERVER={db.example.internal},1433;" not in client.connection_string
+
+
 def test_pyodbc_sql_server_client_escapes_braced_connection_string_values():
     client = PyodbcSqlServerClient(
         host="db.example.internal",

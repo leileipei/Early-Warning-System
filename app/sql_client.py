@@ -35,6 +35,13 @@ def strip_single_trailing_semicolon(sql: str) -> str:
     return stripped_sql
 
 
+def normalize_extra_params(extra_params: str) -> str:
+    parts = [part.strip() for part in extra_params.split(";") if part.strip()]
+    if not parts:
+        return ""
+    return "".join(f"{part};" for part in parts)
+
+
 class PyodbcSqlServerClient:
     def __init__(
         self,
@@ -44,16 +51,26 @@ class PyodbcSqlServerClient:
         username: str,
         password: str,
         connect_timeout_seconds: int,
+        odbc_driver: str = "ODBC Driver 18 for SQL Server",
+        server_override: str = "",
+        encrypt: str = "yes",
+        trust_server_certificate: str = "yes",
+        extra_params: str = "",
     ):
+        if server_override.strip():
+            server_fragment = f"SERVER={odbc_brace_escape(server_override.strip())};"
+        else:
+            server_fragment = f"SERVER={odbc_brace_escape(host)},{port};"
         self.connection_string = (
-            "DRIVER={ODBC Driver 18 for SQL Server};"
-            f"SERVER={odbc_brace_escape(host)},{port};"
+            f"DRIVER={odbc_brace_escape(odbc_driver)};"
+            f"{server_fragment}"
             f"DATABASE={odbc_brace_escape(database)};"
             f"UID={odbc_brace_escape(username)};"
             f"PWD={odbc_brace_escape(password)};"
-            "Encrypt=yes;"
-            "TrustServerCertificate=yes;"
+            f"Encrypt={encrypt};"
+            f"TrustServerCertificate={trust_server_certificate};"
             f"Connection Timeout={connect_timeout_seconds};"
+            f"{normalize_extra_params(extra_params)}"
         )
 
     def query(self, sql: str, timeout_seconds: int, max_rows: int) -> QueryResult:

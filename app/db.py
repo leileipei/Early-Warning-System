@@ -2,12 +2,14 @@ from collections.abc import Generator
 
 from sqlalchemy import event
 from sqlalchemy.engine import Engine
+from sqlalchemy import inspect, text
 from sqlalchemy.pool import StaticPool
 from sqlmodel import Session, SQLModel, create_engine
 
 from app.settings import get_settings
 
 _engine: Engine | None = None
+_schema_initialized = False
 
 
 def create_db_engine(database_url: str | None = None) -> Engine:
@@ -41,8 +43,41 @@ def init_db(engine: Engine | None = None) -> None:
 
     target_engine = engine if engine is not None else get_engine()
     SQLModel.metadata.create_all(target_engine)
+    migrate_sqlite_schema(target_engine)
+
+
+def ensure_schema_initialized() -> None:
+    global _schema_initialized
+
+    if _schema_initialized:
+        return
+    init_db()
+    _schema_initialized = True
+
+
+def migrate_sqlite_schema(engine: Engine) -> None:
+    if engine.dialect.name != "sqlite":
+        return
+
+    inspector = inspect(engine)
+    if "sqldatasource" not in inspector.get_table_names():
+        return
+
+    existing_columns = {column["name"] for column in inspector.get_columns("sqldatasource")}
+    columns_to_add = {
+        "odbc_driver": "VARCHAR NOT NULL DEFAULT 'ODBC Driver 18 for SQL Server'",
+        "server_override": "VARCHAR NOT NULL DEFAULT ''",
+        "encrypt": "VARCHAR NOT NULL DEFAULT 'yes'",
+        "trust_server_certificate": "VARCHAR NOT NULL DEFAULT 'yes'",
+        "extra_params": "VARCHAR NOT NULL DEFAULT ''",
+    }
+    with engine.begin() as connection:
+        for column_name, ddl in columns_to_add.items():
+            if column_name not in existing_columns:
+                connection.execute(text(f"ALTER TABLE sqldatasource ADD COLUMN {column_name} {ddl}"))
 
 
 def get_session() -> Generator[Session, None, None]:
+    ensure_schema_initialized()
     with Session(get_engine()) as session:
         yield session

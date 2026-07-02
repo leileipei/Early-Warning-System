@@ -37,6 +37,11 @@ def build_sql_client(data_source: SqlDataSource) -> PyodbcSqlServerClient:
         username=data_source.username,
         password=password,
         connect_timeout_seconds=data_source.connect_timeout_seconds,
+        odbc_driver=data_source.odbc_driver,
+        server_override=data_source.server_override,
+        encrypt=data_source.encrypt,
+        trust_server_certificate=data_source.trust_server_certificate,
+        extra_params=data_source.extra_params,
     )
 
 

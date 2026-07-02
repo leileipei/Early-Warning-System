@@ -2,7 +2,7 @@ import importlib
 import sys
 
 import pytest
-from sqlalchemy import inspect
+from sqlalchemy import inspect, text
 from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, select
 
@@ -76,6 +76,44 @@ def test_init_db_creates_model_tables(engine):
         "executionlog",
         "maillog",
     } <= table_names
+
+
+def test_init_db_adds_sql_server_connection_option_columns_to_existing_sqlite_table(tmp_path):
+    from app.db import create_db_engine, init_db
+
+    database_path = tmp_path / "legacy.sqlite3"
+    legacy_engine = create_db_engine(f"sqlite:///{database_path}")
+    with legacy_engine.begin() as connection:
+        connection.execute(
+            text(
+                """
+                CREATE TABLE sqldatasource (
+                    id INTEGER PRIMARY KEY,
+                    name VARCHAR NOT NULL,
+                    host VARCHAR NOT NULL,
+                    port INTEGER NOT NULL,
+                    database VARCHAR NOT NULL,
+                    username VARCHAR NOT NULL,
+                    encrypted_password VARCHAR NOT NULL,
+                    enabled BOOLEAN NOT NULL,
+                    connect_timeout_seconds INTEGER NOT NULL,
+                    created_at DATETIME NOT NULL,
+                    updated_at DATETIME NOT NULL
+                )
+                """
+            )
+        )
+
+    init_db(legacy_engine)
+
+    columns = {column["name"] for column in inspect(legacy_engine).get_columns("sqldatasource")}
+    assert {
+        "odbc_driver",
+        "server_override",
+        "encrypt",
+        "trust_server_certificate",
+        "extra_params",
+    } <= columns
 
 
 def test_sqlite_foreign_keys_are_enforced(session):
