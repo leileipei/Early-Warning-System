@@ -78,6 +78,20 @@
         <input name="max_rows" type="number" value="{{ form.get('max_rows', '500') }}" min="1">
       </label>
     </div>
+    <div class="form-row">
+      <label>
+        <span>重复预警抑制</span>
+        <input name="suppress_duplicates" type="checkbox" {% if form.get('suppress_duplicates', '') %}checked{% endif %}>
+      </label>
+      <label>
+        <span>去重字段</span>
+        <input name="suppression_key_field" value="{{ form.get('suppression_key_field', '') }}" placeholder="例如：order_id">
+      </label>
+      <label>
+        <span>抑制窗口（小时）</span>
+        <input name="suppression_window_hours" type="number" value="{{ form.get('suppression_window_hours', '24') }}" min="1">
+      </label>
+    </div>
     <label>
       <span>启用</span>
       <input name="enabled" type="checkbox" {% if form.get('enabled', 'on') %}checked{% endif %}>

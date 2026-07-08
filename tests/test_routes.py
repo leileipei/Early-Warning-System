@@ -327,6 +327,46 @@ def test_create_rule_persists_alert_rule(monkeypatch, session):
         get_settings.cache_clear()
 
 
+def test_create_rule_persists_duplicate_suppression_settings(monkeypatch, session):
+    data_source = _create_data_source(session)
+    form_data = _valid_rule_form(data_source.id)
+    form_data.update(
+        {
+            "suppress_duplicates": "on",
+            "suppression_key_field": "order_id",
+            "suppression_window_hours": "12",
+        }
+    )
+    client, get_settings, app = _client_with_admin(monkeypatch, session)
+    try:
+        response = client.post("/rules", data=form_data, follow_redirects=False)
+
+        assert response.status_code == 303
+        rule = session.exec(select(AlertRule)).one()
+        assert rule.suppress_duplicates is True
+        assert rule.suppression_key_field == "order_id"
+        assert rule.suppression_window_hours == 12
+    finally:
+        app.dependency_overrides.clear()
+        get_settings.cache_clear()
+
+
+def test_create_rule_requires_suppression_key_when_enabled(monkeypatch, session):
+    data_source = _create_data_source(session)
+    form_data = _valid_rule_form(data_source.id)
+    form_data.update({"suppress_duplicates": "on", "suppression_key_field": ""})
+    client, get_settings, app = _client_with_admin(monkeypatch, session)
+    try:
+        response = client.post("/rules", data=form_data)
+
+        assert response.status_code == 400
+        assert "启用重复抑制时必须填写去重字段" in response.text
+        assert session.exec(select(AlertRule)).all() == []
+    finally:
+        app.dependency_overrides.clear()
+        get_settings.cache_clear()
+
+
 def test_rules_page_lists_existing_rules(monkeypatch, session):
     data_source = _create_data_source(session)
     session.add(
@@ -363,7 +403,14 @@ def test_rules_page_lists_existing_rules(monkeypatch, session):
 
 def test_export_rules_json_includes_data_source_name(monkeypatch, session):
     data_source = _create_data_source(session)
-    rule = _create_rule(session, data_source, notes="迁移备注")
+    rule = _create_rule(
+        session,
+        data_source,
+        notes="迁移备注",
+        suppress_duplicates=True,
+        suppression_key_field="order_id",
+        suppression_window_hours=12,
+    )
     client, get_settings, app = _client_with_admin(monkeypatch, session)
     try:
         response = client.get("/rules/export.json")
@@ -378,6 +425,9 @@ def test_export_rules_json_includes_data_source_name(monkeypatch, session):
         assert payload["rules"][0]["data_source_name"] == data_source.name
         assert payload["rules"][0]["notes"] == "迁移备注"
         assert payload["rules"][0]["send_mode"] == "summary"
+        assert payload["rules"][0]["suppress_duplicates"] is True
+        assert payload["rules"][0]["suppression_key_field"] == "order_id"
+        assert payload["rules"][0]["suppression_window_hours"] == 12
         assert "data_source_id" not in payload["rules"][0]
         assert "id" not in payload["rules"][0]
     finally:
@@ -417,6 +467,9 @@ def test_import_rules_json_creates_rules(monkeypatch, session):
                 "max_rows": 100,
                 "enabled": False,
                 "notes": "导入备注",
+                "suppress_duplicates": True,
+                "suppression_key_field": "order_id",
+                "suppression_window_hours": 12,
             }
         ],
     }
@@ -444,6 +497,9 @@ def test_import_rules_json_creates_rules(monkeypatch, session):
         assert rule.max_rows == 100
         assert rule.enabled is False
         assert rule.notes == "导入备注"
+        assert rule.suppress_duplicates is True
+        assert rule.suppression_key_field == "order_id"
+        assert rule.suppression_window_hours == 12
     finally:
         app.dependency_overrides.clear()
         get_settings.cache_clear()
@@ -854,7 +910,15 @@ def test_preview_rule_sql_requires_admin_session(monkeypatch):
 
 def test_edit_rule_page_prefills_existing_rule(monkeypatch, session):
     data_source = _create_data_source(session)
-    rule = _create_rule(session, data_source, name="库存预警", sql_text="select id from stock")
+    rule = _create_rule(
+        session,
+        data_source,
+        name="库存预警",
+        sql_text="select id from stock",
+        suppress_duplicates=True,
+        suppression_key_field="stock_id",
+        suppression_window_hours=8,
+    )
     client, get_settings, app = _client_with_admin(monkeypatch, session)
     try:
         response = client.get(f"/rules/{rule.id}/edit")
@@ -864,6 +928,9 @@ def test_edit_rule_page_prefills_existing_rule(monkeypatch, session):
         assert "库存预警" in response.text
         assert "select id from stock" in response.text
         assert f'action="/rules/{rule.id}"' in response.text
+        assert 'name="suppress_duplicates" type="checkbox" checked' in response.text
+        assert 'name="suppression_key_field" value="stock_id"' in response.text
+        assert 'name="suppression_window_hours" type="number" value="8"' in response.text
     finally:
         app.dependency_overrides.clear()
         get_settings.cache_clear()
@@ -937,6 +1004,9 @@ def test_update_rule_persists_changes(monkeypatch, session):
             "send_mode": "per_row",
             "query_timeout_seconds": "45",
             "max_rows": "100",
+            "suppress_duplicates": "on",
+            "suppression_key_field": "customer_id",
+            "suppression_window_hours": "6",
         }
     )
     form_data.pop("enabled")
@@ -959,6 +1029,9 @@ def test_update_rule_persists_changes(monkeypatch, session):
         assert rule.query_timeout_seconds == 45
         assert rule.max_rows == 100
         assert rule.enabled is False
+        assert rule.suppress_duplicates is True
+        assert rule.suppression_key_field == "customer_id"
+        assert rule.suppression_window_hours == 6
     finally:
         app.dependency_overrides.clear()
         get_settings.cache_clear()

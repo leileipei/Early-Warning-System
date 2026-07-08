@@ -1,5 +1,6 @@
 from dataclasses import dataclass, field
 from re import split
+from collections.abc import Callable
 from typing import Protocol
 
 from app.mailer import EmailMessage, MailSendResult, SmtpMailer
@@ -49,7 +50,12 @@ class RuleExecutor:
         self.mailer = mailer
         self.max_rows = max_rows
 
-    def execute(self, rule: AlertRule, trigger_type=None) -> ExecutionResult:
+    def execute(
+        self,
+        rule: AlertRule,
+        trigger_type=None,
+        row_filter: Callable[[list[dict]], list[dict]] | None = None,
+    ) -> ExecutionResult:
         sql = _rule_sql(rule)
         try:
             validate_select_only_sql(sql)
@@ -74,15 +80,18 @@ class RuleExecutor:
             )
 
         rows = query_result.rows
+        row_count = len(rows)
+        if row_filter is not None:
+            rows = row_filter(rows)
         if not rows:
-            return ExecutionResult(status=ExecutionStatus.SUCCESS, row_count=0)
+            return ExecutionResult(status=ExecutionStatus.SUCCESS, row_count=row_count)
 
         try:
             messages = self._build_messages(rule, rows)
         except Exception as exc:
             return ExecutionResult(
                 status=ExecutionStatus.FAILED,
-                row_count=len(rows),
+                row_count=row_count,
                 error_type=type(exc).__name__,
                 error_message=_exception_message(exc),
             )
@@ -95,7 +104,7 @@ class RuleExecutor:
 
         return ExecutionResult(
             status=status,
-            row_count=len(rows),
+            row_count=row_count,
             mail_count=successful_count,
             error_type="MailSendError" if has_failure else "",
             error_message=error_message,

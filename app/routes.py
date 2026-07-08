@@ -109,6 +109,9 @@ def _rule_to_form(rule: AlertRule) -> dict[str, str]:
         "query_timeout_seconds": str(rule.query_timeout_seconds),
         "max_rows": str(rule.max_rows),
         "enabled": "on" if rule.enabled else "",
+        "suppress_duplicates": "on" if rule.suppress_duplicates else "",
+        "suppression_key_field": rule.suppression_key_field,
+        "suppression_window_hours": str(rule.suppression_window_hours),
     }
 
 
@@ -160,6 +163,9 @@ def _rule_export_payload(session: Session) -> dict:
                 "max_rows": rule.max_rows,
                 "enabled": rule.enabled,
                 "notes": rule.notes,
+                "suppress_duplicates": rule.suppress_duplicates,
+                "suppression_key_field": rule.suppression_key_field,
+                "suppression_window_hours": rule.suppression_window_hours,
             }
             for rule in rules
         ],
@@ -251,8 +257,19 @@ def _build_imported_rules(payload: dict, session: Session) -> list[AlertRule]:
                 max_rows=_positive_import_int(rule_data, "max_rows", index, "最大返回行数", 500),
                 enabled=bool(rule_data.get("enabled", True)),
                 notes=_optional_import_text(rule_data, "notes"),
+                suppress_duplicates=bool(rule_data.get("suppress_duplicates", False)),
+                suppression_key_field=_optional_import_text(rule_data, "suppression_key_field").strip(),
+                suppression_window_hours=_positive_import_int(
+                    rule_data,
+                    "suppression_window_hours",
+                    index,
+                    "重复抑制窗口",
+                    24,
+                ),
             )
         )
+        if imported_rules[-1].suppress_duplicates and not imported_rules[-1].suppression_key_field:
+            raise ValueError(f"第 {index} 条规则启用重复抑制时必须填写去重字段")
     return imported_rules
 
 
@@ -269,6 +286,9 @@ def _submitted_rule_form(
     query_timeout_seconds: int,
     max_rows: int,
     enabled: str | None,
+    suppress_duplicates: str | None,
+    suppression_key_field: str,
+    suppression_window_hours: int,
 ) -> dict[str, str]:
     return {
         "name": name,
@@ -283,6 +303,9 @@ def _submitted_rule_form(
         "query_timeout_seconds": str(query_timeout_seconds),
         "max_rows": str(max_rows),
         "enabled": "on" if _is_checked(enabled) else "",
+        "suppress_duplicates": "on" if _is_checked(suppress_duplicates) else "",
+        "suppression_key_field": suppression_key_field.strip(),
+        "suppression_window_hours": str(suppression_window_hours),
     }
 
 
@@ -366,6 +389,42 @@ def _validate_rule_form(
             ),
             status_code=400,
         )
+
+    if form.get("suppress_duplicates"):
+        if not form.get("suppression_key_field", "").strip():
+            return None, None, _template_response(
+                request,
+                "rule_form.html",
+                _rule_form_context(
+                    request,
+                    admin,
+                    session,
+                    error="启用重复抑制时必须填写去重字段",
+                    form=form,
+                    action=action,
+                    heading=heading,
+                ),
+                status_code=400,
+            )
+        try:
+            suppression_window_hours = int(form.get("suppression_window_hours", "24"))
+        except ValueError:
+            suppression_window_hours = 0
+        if suppression_window_hours <= 0:
+            return None, None, _template_response(
+                request,
+                "rule_form.html",
+                _rule_form_context(
+                    request,
+                    admin,
+                    session,
+                    error="重复抑制窗口必须是正整数",
+                    form=form,
+                    action=action,
+                    heading=heading,
+                ),
+                status_code=400,
+            )
 
     return source_id, parsed_send_mode, None
 
@@ -539,6 +598,9 @@ def create_rule(
     query_timeout_seconds: int = Form(30),
     max_rows: int = Form(500),
     enabled: str | None = Form(None),
+    suppress_duplicates: str | None = Form(None),
+    suppression_key_field: str = Form(""),
+    suppression_window_hours: int = Form(24),
     admin: AdminUser = Depends(require_admin),
     session: Session = Depends(get_session),
 ):
@@ -555,6 +617,9 @@ def create_rule(
         query_timeout_seconds,
         max_rows,
         enabled,
+        suppress_duplicates,
+        suppression_key_field,
+        suppression_window_hours,
     )
     source_id, parsed_send_mode, error_response = _validate_rule_form(
         request,
@@ -580,6 +645,9 @@ def create_rule(
         query_timeout_seconds=query_timeout_seconds,
         max_rows=max_rows,
         enabled=_is_checked(enabled),
+        suppress_duplicates=_is_checked(suppress_duplicates),
+        suppression_key_field=suppression_key_field.strip(),
+        suppression_window_hours=suppression_window_hours,
     )
     session.add(rule)
     session.commit()
@@ -757,6 +825,9 @@ def update_rule(
     query_timeout_seconds: int = Form(30),
     max_rows: int = Form(500),
     enabled: str | None = Form(None),
+    suppress_duplicates: str | None = Form(None),
+    suppression_key_field: str = Form(""),
+    suppression_window_hours: int = Form(24),
     admin: AdminUser = Depends(require_admin),
     session: Session = Depends(get_session),
 ):
@@ -777,6 +848,9 @@ def update_rule(
         query_timeout_seconds,
         max_rows,
         enabled,
+        suppress_duplicates,
+        suppression_key_field,
+        suppression_window_hours,
     )
     source_id, parsed_send_mode, error_response = _validate_rule_form(
         request,
@@ -801,6 +875,9 @@ def update_rule(
     rule.query_timeout_seconds = query_timeout_seconds
     rule.max_rows = max_rows
     rule.enabled = _is_checked(enabled)
+    rule.suppress_duplicates = _is_checked(suppress_duplicates)
+    rule.suppression_key_field = suppression_key_field.strip()
+    rule.suppression_window_hours = suppression_window_hours
     rule.updated_at = utc_now()
     session.add(rule)
     session.commit()

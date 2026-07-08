@@ -6,6 +6,7 @@ from app.executor import RuleExecutor
 from app.mailer import MailSendResult
 from app.models import (
     AlertRule,
+    AlertSuppression,
     ExecutionStatus,
     MailLog,
     MailStatus,
@@ -450,6 +451,147 @@ def test_execute_rule_by_id_persists_partial_mail_results(monkeypatch, session):
     assert mail_logs[0].recipients == "ops@example.com"
     assert mail_logs[1].error_message == "smtp rejected"
     assert len(mail_logs) == 2
+
+
+def test_execute_rule_by_id_records_suppression_keys_after_success(monkeypatch, session):
+    data_source = persist_data_source(session)
+    persist_smtp_config(session)
+    rule = persist_rule(
+        session,
+        data_source,
+        suppress_duplicates=True,
+        suppression_key_field="id",
+        suppression_window_hours=24,
+    )
+    monkeypatch.setattr(
+        execution_service,
+        "build_sql_client",
+        lambda data_source: FakeSqlClient([{"id": 1, "amount": 100}, {"id": 2, "amount": 200}]),
+    )
+    monkeypatch.setattr(execution_service, "build_smtp_mailer", lambda config: FakeMailer())
+
+    execution_log = execution_service.execute_rule_by_id(
+        session,
+        rule.id,
+        TriggerType.MANUAL,
+        retry_delay_seconds=0,
+    )
+
+    suppressions = session.exec(select(AlertSuppression).order_by(AlertSuppression.suppression_key)).all()
+    assert execution_log.status == ExecutionStatus.SUCCESS
+    assert execution_log.row_count == 2
+    assert execution_log.email_count == 1
+    assert [suppression.suppression_key for suppression in suppressions] == ["1", "2"]
+    assert [suppression.hit_count for suppression in suppressions] == [1, 1]
+
+
+def test_execute_rule_by_id_suppresses_repeated_rows_inside_window(monkeypatch, session):
+    data_source = persist_data_source(session)
+    persist_smtp_config(session)
+    rule = persist_rule(
+        session,
+        data_source,
+        suppress_duplicates=True,
+        suppression_key_field="id",
+        suppression_window_hours=24,
+    )
+    sql_client = FakeSqlClient([{"id": 1, "amount": 100}, {"id": 2, "amount": 200}])
+    monkeypatch.setattr(execution_service, "build_sql_client", lambda data_source: sql_client)
+    monkeypatch.setattr(execution_service, "build_smtp_mailer", lambda config: FakeMailer())
+
+    first_log = execution_service.execute_rule_by_id(
+        session,
+        rule.id,
+        TriggerType.MANUAL,
+        retry_delay_seconds=0,
+    )
+    second_log = execution_service.execute_rule_by_id(
+        session,
+        rule.id,
+        TriggerType.MANUAL,
+        retry_delay_seconds=0,
+    )
+
+    suppressions = session.exec(select(AlertSuppression).order_by(AlertSuppression.suppression_key)).all()
+    mail_logs = session.exec(select(MailLog)).all()
+    assert first_log.email_count == 1
+    assert second_log.status == ExecutionStatus.SUCCESS
+    assert second_log.row_count == 2
+    assert second_log.email_count == 0
+    assert len(mail_logs) == 1
+    assert [suppression.hit_count for suppression in suppressions] == [2, 2]
+
+
+def test_execute_rule_by_id_suppresses_only_matching_keys(monkeypatch, session):
+    data_source = persist_data_source(session)
+    persist_smtp_config(session)
+    rule = persist_rule(
+        session,
+        data_source,
+        suppress_duplicates=True,
+        suppression_key_field="id",
+        suppression_window_hours=24,
+        send_mode=SendMode.PER_ROW,
+        body_template="{{id}}",
+    )
+    session.add(AlertSuppression(rule_id=rule.id, suppression_key="1"))
+    session.commit()
+    mailer = FakeMailer()
+    monkeypatch.setattr(
+        execution_service,
+        "build_sql_client",
+        lambda data_source: FakeSqlClient([{"id": 1}, {"id": 2}]),
+    )
+    monkeypatch.setattr(execution_service, "build_smtp_mailer", lambda config: mailer)
+
+    execution_log = execution_service.execute_rule_by_id(
+        session,
+        rule.id,
+        TriggerType.MANUAL,
+        retry_delay_seconds=0,
+    )
+
+    suppressions = session.exec(select(AlertSuppression).order_by(AlertSuppression.suppression_key)).all()
+    assert execution_log.status == ExecutionStatus.SUCCESS
+    assert execution_log.row_count == 2
+    assert execution_log.email_count == 1
+    assert [message.html_body for message in mailer.messages] == ["2"]
+    assert [suppression.suppression_key for suppression in suppressions] == ["1", "2"]
+    assert [suppression.hit_count for suppression in suppressions] == [2, 1]
+
+
+def test_execute_rule_by_id_does_not_record_suppression_on_partial_failure(monkeypatch, session):
+    data_source = persist_data_source(session)
+    persist_smtp_config(session)
+    rule = persist_rule(
+        session,
+        data_source,
+        suppress_duplicates=True,
+        suppression_key_field="id",
+        suppression_window_hours=24,
+        send_mode=SendMode.PER_ROW,
+        body_template="{{id}}",
+    )
+    monkeypatch.setattr(
+        execution_service,
+        "build_sql_client",
+        lambda data_source: FakeSqlClient([{"id": 1}, {"id": 2}]),
+    )
+    monkeypatch.setattr(
+        execution_service,
+        "build_smtp_mailer",
+        lambda config: FakeMailer(results=[MailSendResult(success=True), MailSendResult(success=False)]),
+    )
+
+    execution_log = execution_service.execute_rule_by_id(
+        session,
+        rule.id,
+        TriggerType.MANUAL,
+        retry_delay_seconds=0,
+    )
+
+    assert execution_log.status == ExecutionStatus.PARTIAL_FAILED
+    assert session.exec(select(AlertSuppression)).all() == []
 
 
 def test_execute_rule_by_id_persists_failed_log_when_data_source_disabled(monkeypatch, session):

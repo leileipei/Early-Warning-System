@@ -86,8 +86,20 @@ class AlertRule(SQLModel, table=True):
     max_rows: int = 500
     enabled: bool = True
     notes: str = ""
+    suppress_duplicates: bool = False
+    suppression_key_field: str = ""
+    suppression_window_hours: int = 24
     created_at: datetime = Field(default_factory=utc_now)
     updated_at: datetime = Field(default_factory=utc_now)
+
+
+class AlertSuppression(SQLModel, table=True):
+    id: Optional[int] = Field(default=None, primary_key=True)
+    rule_id: int = Field(foreign_key="alertrule.id", index=True)
+    suppression_key: str = Field(index=True)
+    first_seen_at: datetime = Field(default_factory=utc_now)
+    last_seen_at: datetime = Field(default_factory=utc_now)
+    hit_count: int = 1
 
 
 class ExecutionLog(SQLModel, table=True):

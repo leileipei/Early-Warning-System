@@ -8,6 +8,7 @@ from sqlmodel import Session, select
 
 from app.models import (
     AlertRule,
+    AlertSuppression,
     ExecutionLog,
     SendMode,
     SqlDataSource,
@@ -73,6 +74,7 @@ def test_init_db_creates_model_tables(engine):
         "sqldatasource",
         "smtpconfig",
         "alertrule",
+        "alertsuppression",
         "executionlog",
         "maillog",
     } <= table_names
@@ -114,6 +116,60 @@ def test_init_db_adds_sql_server_connection_option_columns_to_existing_sqlite_ta
         "trust_server_certificate",
         "extra_params",
     } <= columns
+
+
+def test_init_db_adds_duplicate_suppression_columns_to_existing_sqlite_rule_table(tmp_path):
+    from app.db import create_db_engine, init_db
+
+    database_path = tmp_path / "legacy_rules.sqlite3"
+    legacy_engine = create_db_engine(f"sqlite:///{database_path}")
+    with legacy_engine.begin() as connection:
+        connection.execute(
+            text(
+                """
+                CREATE TABLE alertrule (
+                    id INTEGER PRIMARY KEY,
+                    name VARCHAR NOT NULL,
+                    data_source_id INTEGER NOT NULL,
+                    sql_text VARCHAR NOT NULL,
+                    cron_expression VARCHAR NOT NULL,
+                    recipients VARCHAR NOT NULL,
+                    cc_recipients VARCHAR NOT NULL,
+                    subject_template VARCHAR NOT NULL,
+                    body_template VARCHAR NOT NULL,
+                    send_mode VARCHAR NOT NULL,
+                    query_timeout_seconds INTEGER NOT NULL,
+                    max_rows INTEGER NOT NULL,
+                    enabled BOOLEAN NOT NULL,
+                    notes VARCHAR NOT NULL,
+                    created_at DATETIME NOT NULL,
+                    updated_at DATETIME NOT NULL
+                )
+                """
+            )
+        )
+
+    init_db(legacy_engine)
+
+    columns = {column["name"] for column in inspect(legacy_engine).get_columns("alertrule")}
+    assert {
+        "suppress_duplicates",
+        "suppression_key_field",
+        "suppression_window_hours",
+    } <= columns
+
+
+def test_alert_suppression_persists_for_rule(session):
+    rule = _create_rule(session)
+    suppression = AlertSuppression(rule_id=rule.id, suppression_key="order-1001")
+    session.add(suppression)
+    session.commit()
+    session.refresh(suppression)
+
+    assert suppression.id is not None
+    assert suppression.rule_id == rule.id
+    assert suppression.suppression_key == "order-1001"
+    assert suppression.hit_count == 1
 
 
 def test_sqlite_foreign_keys_are_enforced(session):

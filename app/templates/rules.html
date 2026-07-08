@@ -33,6 +33,7 @@
           <th>调度</th>
           <th>状态</th>
           <th>发送方式</th>
+          <th>重复抑制</th>
           <th>操作</th>
         </tr>
       </thead>
@@ -43,6 +44,13 @@
           <td>{{ rule.cron_expression }}</td>
           <td>{{ "启用" if rule.enabled else "停用" }}</td>
           <td>{{ "汇总一封" if rule.send_mode == "summary" else "每行一封" }}</td>
+          <td>
+            {% if rule.suppress_duplicates %}
+            {{ rule.suppression_key_field }} / {{ rule.suppression_window_hours }} 小时
+            {% else %}
+            未启用
+            {% endif %}
+          </td>
           <td>
             <div class="table-actions">
               <a class="button button-secondary" href="/rules/{{ rule.id }}/edit">编辑</a>
@@ -55,7 +63,7 @@
         </tr>
         {% else %}
         <tr>
-          <td colspan="5" class="empty-cell">暂无规则</td>
+          <td colspan="6" class="empty-cell">暂无规则</td>
         </tr>
         {% endfor %}
       </tbody>

@@ -76,6 +76,20 @@ def migrate_sqlite_schema(engine: Engine) -> None:
             if column_name not in existing_columns:
                 connection.execute(text(f"ALTER TABLE sqldatasource ADD COLUMN {column_name} {ddl}"))
 
+    if "alertrule" not in inspector.get_table_names():
+        return
+
+    existing_rule_columns = {column["name"] for column in inspector.get_columns("alertrule")}
+    rule_columns_to_add = {
+        "suppress_duplicates": "BOOLEAN NOT NULL DEFAULT 0",
+        "suppression_key_field": "VARCHAR NOT NULL DEFAULT ''",
+        "suppression_window_hours": "INTEGER NOT NULL DEFAULT 24",
+    }
+    with engine.begin() as connection:
+        for column_name, ddl in rule_columns_to_add.items():
+            if column_name not in existing_rule_columns:
+                connection.execute(text(f"ALTER TABLE alertrule ADD COLUMN {column_name} {ddl}"))
+
 
 def get_session() -> Generator[Session, None, None]:
     ensure_schema_initialized()

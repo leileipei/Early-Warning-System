@@ -1,7 +1,7 @@
 import smtplib
 import time
 from dataclasses import replace
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from sqlmodel import Session, select
 
@@ -10,6 +10,7 @@ from app.executor import ExecutionResult, RuleExecutor
 from app.mailer import SmtpMailer
 from app.models import (
     AlertRule,
+    AlertSuppression,
     ExecutionLog,
     ExecutionStatus,
     MailLog,
@@ -111,12 +112,19 @@ def _execute_rule_once(session: Session, rule: AlertRule, trigger_type: TriggerT
     try:
         data_source = _get_enabled_data_source(session, rule)
         smtp_config = _get_enabled_smtp_config(session)
+        suppression_filter, suppression_state = _build_suppression_filter(session, rule)
         executor = RuleExecutor(
             sql_client=build_sql_client(data_source),
             mailer=build_smtp_mailer(smtp_config),
             max_rows=rule.max_rows,
         )
-        result = executor.execute(rule, trigger_type=trigger_type)
+        result = executor.execute(
+            rule,
+            trigger_type=trigger_type,
+            row_filter=suppression_filter,
+        )
+        if suppression_state is not None and result.status == ExecutionStatus.SUCCESS:
+            _persist_suppression_state(session, rule, suppression_state)
     except ConfigurationError as exc:
         result = ExecutionResult(
             status=ExecutionStatus.FAILED,
@@ -131,6 +139,71 @@ def _execute_rule_once(session: Session, rule: AlertRule, trigger_type: TriggerT
         )
 
     return result
+
+
+def _build_suppression_filter(session: Session, rule: AlertRule):
+    if not rule.suppress_duplicates or not rule.suppression_key_field:
+        return None, None
+
+    now = datetime.utcnow()
+    cutoff = now - timedelta(hours=rule.suppression_window_hours)
+    state = {"new_keys": [], "suppressed_keys": [], "now": now}
+    seen_in_run = set()
+
+    def filter_rows(rows: list[dict]) -> list[dict]:
+        filtered_rows = []
+        for row in rows:
+            key = _row_suppression_key(row, rule.suppression_key_field)
+            if not key:
+                filtered_rows.append(row)
+                continue
+
+            suppression = _get_suppression_record(session, rule.id, key)
+            if key in seen_in_run or (suppression is not None and suppression.last_seen_at >= cutoff):
+                state["suppressed_keys"].append(key)
+                continue
+
+            seen_in_run.add(key)
+            state["new_keys"].append(key)
+            filtered_rows.append(row)
+        return filtered_rows
+
+    return filter_rows, state
+
+
+def _row_suppression_key(row: dict, field_name: str) -> str:
+    value = row.get(field_name)
+    if value is None:
+        return ""
+    return str(value).strip()
+
+
+def _get_suppression_record(session: Session, rule_id: int, key: str) -> AlertSuppression | None:
+    return session.exec(
+        select(AlertSuppression).where(
+            AlertSuppression.rule_id == rule_id,
+            AlertSuppression.suppression_key == key,
+        )
+    ).first()
+
+
+def _persist_suppression_state(session: Session, rule: AlertRule, state: dict) -> None:
+    now = state["now"]
+    for key in [*state["new_keys"], *state["suppressed_keys"]]:
+        suppression = _get_suppression_record(session, rule.id, key)
+        if suppression is None:
+            suppression = AlertSuppression(
+                rule_id=rule.id,
+                suppression_key=key,
+                first_seen_at=now,
+                last_seen_at=now,
+                hit_count=1,
+            )
+        else:
+            suppression.last_seen_at = now
+            suppression.hit_count += 1
+        session.add(suppression)
+    session.commit()
 
 
 def _is_retryable_result(result: ExecutionResult) -> bool:
