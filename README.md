@@ -56,3 +56,7 @@ ruff check .
 生产部署、外部 IP 访问、Web/Worker 进程、ODBC 驱动、SMTP 排查和备份建议见：
 
 [docs/deployment.md](docs/deployment.md)
+
+日常巡检、备份恢复、升级发布和故障处理见：
+
+[docs/operations.md](docs/operations.md)
