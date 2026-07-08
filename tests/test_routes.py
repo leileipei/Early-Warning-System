@@ -1237,11 +1237,108 @@ def test_logs_page_lists_execution_and_mail_logs(monkeypatch, session):
         response = client.get("/logs")
 
         assert response.status_code == 200
+        assert "/logs/executions.csv" in response.text
+        assert "/logs/mails.csv" in response.text
+        assert "导出执行日志" in response.text
+        assert "导出邮件日志" in response.text
         assert "大额订单预警" in response.text
         assert "ops@example.com" in response.text
         assert "manual" in response.text
     finally:
         app.dependency_overrides.clear()
+        get_settings.cache_clear()
+
+
+def test_export_execution_logs_csv(monkeypatch, session):
+    data_source = _create_data_source(session)
+    rule = _create_rule(session, data_source)
+    execution_log = ExecutionLog(
+        rule_id=rule.id,
+        trigger_type=TriggerType.MANUAL,
+        status=ExecutionStatus.FAILED,
+        row_count=3,
+        email_count=1,
+        duration_ms=250,
+        error_type="RuntimeError",
+        error_message="连接失败",
+    )
+    session.add(execution_log)
+    session.commit()
+    session.refresh(execution_log)
+    client, get_settings, app = _client_with_admin(monkeypatch, session)
+    try:
+        response = client.get("/logs/executions.csv")
+
+        assert response.status_code == 200
+        assert response.headers["content-type"].startswith("text/csv")
+        assert 'filename="execution-logs.csv"' in response.headers["content-disposition"]
+        assert response.content.startswith("\ufeff".encode())
+        csv_text = response.content.decode("utf-8-sig")
+        assert "ID,规则ID,触发方式,状态,开始时间,结束时间,返回行数,邮件数,耗时毫秒,错误类型,错误信息" in csv_text
+        assert f"{execution_log.id},{rule.id},manual,failed," in csv_text
+        assert ",3,1,250,RuntimeError,连接失败" in csv_text
+    finally:
+        app.dependency_overrides.clear()
+        get_settings.cache_clear()
+
+
+def test_export_mail_logs_csv(monkeypatch, session):
+    data_source = _create_data_source(session)
+    rule = _create_rule(session, data_source)
+    execution_log = ExecutionLog(rule_id=rule.id, trigger_type=TriggerType.MANUAL)
+    session.add(execution_log)
+    session.commit()
+    session.refresh(execution_log)
+    mail_log = MailLog(
+        execution_log_id=execution_log.id,
+        recipients="ops@example.com",
+        cc_recipients="team@example.com",
+        subject="大额订单预警",
+        status=MailStatus.FAILED,
+        error_message="smtp refused",
+    )
+    session.add(mail_log)
+    session.commit()
+    session.refresh(mail_log)
+    client, get_settings, app = _client_with_admin(monkeypatch, session)
+    try:
+        response = client.get("/logs/mails.csv")
+
+        assert response.status_code == 200
+        assert response.headers["content-type"].startswith("text/csv")
+        assert 'filename="mail-logs.csv"' in response.headers["content-disposition"]
+        assert response.content.startswith("\ufeff".encode())
+        csv_text = response.content.decode("utf-8-sig")
+        assert "ID,执行记录ID,收件人,抄送,主题,状态,错误信息,发送时间" in csv_text
+        assert f"{mail_log.id},{execution_log.id},ops@example.com,team@example.com,大额订单预警,failed,smtp refused," in csv_text
+    finally:
+        app.dependency_overrides.clear()
+        get_settings.cache_clear()
+
+
+def test_export_execution_logs_csv_requires_login(monkeypatch):
+    _set_required_settings(monkeypatch)
+    create_app, get_settings = _load_create_app()
+    try:
+        client = TestClient(create_app())
+
+        response = client.get("/logs/executions.csv")
+
+        assert response.status_code == 401
+    finally:
+        get_settings.cache_clear()
+
+
+def test_export_mail_logs_csv_requires_login(monkeypatch):
+    _set_required_settings(monkeypatch)
+    create_app, get_settings = _load_create_app()
+    try:
+        client = TestClient(create_app())
+
+        response = client.get("/logs/mails.csv")
+
+        assert response.status_code == 401
+    finally:
         get_settings.cache_clear()
 
 

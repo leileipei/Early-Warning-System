@@ -1,6 +1,9 @@
+import csv
+from io import StringIO
+
 from apscheduler.triggers.cron import CronTrigger
 from fastapi import APIRouter, Depends, Form, HTTPException, Request
-from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 from fastapi.templating import Jinja2Templates
 from sqlmodel import Session, select
 
@@ -40,6 +43,19 @@ def _template_response(
         template_name,
         {"request": request, **context},
         status_code=status_code,
+    )
+
+
+def _csv_response(filename: str, headers: list[str], rows: list[list]) -> Response:
+    stream = StringIO()
+    writer = csv.writer(stream)
+    writer.writerow(headers)
+    writer.writerows(rows)
+    content = "\ufeff" + stream.getvalue()
+    return Response(
+        content,
+        media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
 
 
@@ -899,4 +915,71 @@ def logs_page(
             "execution_logs": execution_logs,
             "mail_logs": mail_logs,
         },
+    )
+
+
+@router.get("/logs/executions.csv")
+def export_execution_logs_csv(
+    admin: AdminUser = Depends(require_admin),
+    session: Session = Depends(get_session),
+):
+    _ = admin
+    execution_logs = session.exec(select(ExecutionLog).order_by(ExecutionLog.started_at.desc())).all()
+    return _csv_response(
+        "execution-logs.csv",
+        [
+            "ID",
+            "规则ID",
+            "触发方式",
+            "状态",
+            "开始时间",
+            "结束时间",
+            "返回行数",
+            "邮件数",
+            "耗时毫秒",
+            "错误类型",
+            "错误信息",
+        ],
+        [
+            [
+                log.id,
+                log.rule_id,
+                log.trigger_type,
+                log.status,
+                log.started_at,
+                log.finished_at or "",
+                log.row_count,
+                log.email_count,
+                log.duration_ms,
+                log.error_type,
+                log.error_message,
+            ]
+            for log in execution_logs
+        ],
+    )
+
+
+@router.get("/logs/mails.csv")
+def export_mail_logs_csv(
+    admin: AdminUser = Depends(require_admin),
+    session: Session = Depends(get_session),
+):
+    _ = admin
+    mail_logs = session.exec(select(MailLog).order_by(MailLog.sent_at.desc())).all()
+    return _csv_response(
+        "mail-logs.csv",
+        ["ID", "执行记录ID", "收件人", "抄送", "主题", "状态", "错误信息", "发送时间"],
+        [
+            [
+                log.id,
+                log.execution_log_id,
+                log.recipients,
+                log.cc_recipients,
+                log.subject,
+                log.status,
+                log.error_message,
+                log.sent_at,
+            ]
+            for log in mail_logs
+        ],
     )
