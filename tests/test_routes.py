@@ -1241,9 +1241,99 @@ def test_logs_page_lists_execution_and_mail_logs(monkeypatch, session):
         assert "/logs/mails.csv" in response.text
         assert "导出执行日志" in response.text
         assert "导出邮件日志" in response.text
+        assert 'name="execution_status"' in response.text
+        assert 'name="trigger_type"' in response.text
+        assert 'name="rule_id"' in response.text
+        assert 'name="mail_status"' in response.text
+        assert 'name="keyword"' in response.text
         assert "大额订单预警" in response.text
         assert "ops@example.com" in response.text
         assert "manual" in response.text
+    finally:
+        app.dependency_overrides.clear()
+        get_settings.cache_clear()
+
+
+def test_logs_page_filters_execution_logs_by_status_trigger_and_rule(monkeypatch, session):
+    data_source = _create_data_source(session)
+    matching_rule = _create_rule(session, data_source, name="匹配规则")
+    other_rule = _create_rule(
+        session,
+        data_source,
+        name="其他规则",
+        sql_text="select id from invoices",
+        subject_template="其他预警",
+    )
+    session.add(
+        ExecutionLog(
+            rule_id=matching_rule.id,
+            trigger_type=TriggerType.MANUAL,
+            status=ExecutionStatus.FAILED,
+            error_message="目标执行错误",
+        )
+    )
+    session.add(
+        ExecutionLog(
+            rule_id=other_rule.id,
+            trigger_type=TriggerType.SCHEDULED,
+            status=ExecutionStatus.SUCCESS,
+            error_message="另一条执行记录",
+        )
+    )
+    session.commit()
+    client, get_settings, app = _client_with_admin(monkeypatch, session)
+    try:
+        response = client.get(
+            f"/logs?execution_status=failed&trigger_type=manual&rule_id={matching_rule.id}"
+        )
+
+        assert response.status_code == 200
+        assert "目标执行错误" in response.text
+        assert "另一条执行记录" not in response.text
+        assert 'value="failed" selected' in response.text
+        assert 'value="manual" selected' in response.text
+        assert f'value="{matching_rule.id}"' in response.text
+    finally:
+        app.dependency_overrides.clear()
+        get_settings.cache_clear()
+
+
+def test_logs_page_filters_mail_logs_by_status_and_keyword(monkeypatch, session):
+    data_source = _create_data_source(session)
+    rule = _create_rule(session, data_source)
+    execution_log = ExecutionLog(rule_id=rule.id, trigger_type=TriggerType.MANUAL)
+    session.add(execution_log)
+    session.commit()
+    session.refresh(execution_log)
+    session.add(
+        MailLog(
+            execution_log_id=execution_log.id,
+            recipients="ops@example.com",
+            subject="大额订单预警",
+            status=MailStatus.FAILED,
+            error_message="smtp refused",
+        )
+    )
+    session.add(
+        MailLog(
+            execution_log_id=execution_log.id,
+            recipients="boss@example.com",
+            subject="库存预警",
+            status=MailStatus.SUCCESS,
+        )
+    )
+    session.commit()
+    client, get_settings, app = _client_with_admin(monkeypatch, session)
+    try:
+        response = client.get("/logs?mail_status=failed&keyword=ops")
+
+        assert response.status_code == 200
+        assert "ops@example.com" in response.text
+        assert "大额订单预警" in response.text
+        assert "boss@example.com" not in response.text
+        assert "库存预警" not in response.text
+        assert 'value="failed" selected' in response.text
+        assert 'value="ops"' in response.text
     finally:
         app.dependency_overrides.clear()
         get_settings.cache_clear()
@@ -1277,6 +1367,28 @@ def test_export_execution_logs_csv(monkeypatch, session):
         assert "ID,规则ID,触发方式,状态,开始时间,结束时间,返回行数,邮件数,耗时毫秒,错误类型,错误信息" in csv_text
         assert f"{execution_log.id},{rule.id},manual,failed," in csv_text
         assert ",3,1,250,RuntimeError,连接失败" in csv_text
+    finally:
+        app.dependency_overrides.clear()
+        get_settings.cache_clear()
+
+
+def test_export_execution_logs_csv_ignores_page_filters(monkeypatch, session):
+    data_source = _create_data_source(session)
+    rule = _create_rule(session, data_source)
+    execution_log = ExecutionLog(
+        rule_id=rule.id,
+        trigger_type=TriggerType.MANUAL,
+        status=ExecutionStatus.FAILED,
+        error_message="csv 全量导出",
+    )
+    session.add(execution_log)
+    session.commit()
+    client, get_settings, app = _client_with_admin(monkeypatch, session)
+    try:
+        response = client.get("/logs/executions.csv?execution_status=success&keyword=missing")
+
+        assert response.status_code == 200
+        assert "csv 全量导出" in response.content.decode("utf-8-sig")
     finally:
         app.dependency_overrides.clear()
         get_settings.cache_clear()

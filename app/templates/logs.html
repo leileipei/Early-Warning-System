@@ -13,6 +13,51 @@
 </section>
 
 <section class="panel">
+  <h2>筛选</h2>
+  <form class="filter-form" method="get" action="/logs">
+    <label>
+      <span>执行状态</span>
+      <select name="execution_status">
+        <option value="">全部</option>
+        {% for status in execution_statuses %}
+        <option value="{{ status.value }}"{% if filters.execution_status == status.value %} selected{% endif %}>{{ status.value }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <label>
+      <span>触发方式</span>
+      <select name="trigger_type">
+        <option value="">全部</option>
+        {% for trigger in trigger_types %}
+        <option value="{{ trigger.value }}"{% if filters.trigger_type == trigger.value %} selected{% endif %}>{{ trigger.value }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <label>
+      <span>规则 ID</span>
+      <input type="number" name="rule_id" min="1" value="{{ filters.rule_id }}">
+    </label>
+    <label>
+      <span>邮件状态</span>
+      <select name="mail_status">
+        <option value="">全部</option>
+        {% for status in mail_statuses %}
+        <option value="{{ status.value }}"{% if filters.mail_status == status.value %} selected{% endif %}>{{ status.value }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <label class="filter-keyword">
+      <span>关键词</span>
+      <input type="search" name="keyword" value="{{ filters.keyword }}" placeholder="错误、收件人、主题">
+    </label>
+    <div class="filter-actions">
+      <button type="submit">筛选</button>
+      <a class="button button-secondary" href="/logs">重置</a>
+    </div>
+  </form>
+</section>
+
+<section class="panel">
   <h2>执行日志</h2>
   <div class="table-shell">
     <table>
