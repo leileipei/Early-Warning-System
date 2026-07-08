@@ -6,8 +6,23 @@
     <p class="eyebrow">预警</p>
     <h1>规则</h1>
   </div>
-  <a class="button" href="/rules/new">新建规则</a>
+  <div class="button-row">
+    <a class="button button-secondary" href="/rules/export.json">导出规则</a>
+    <form class="import-form" method="post" action="/rules/import" enctype="multipart/form-data">
+      <input type="file" name="file" accept="application/json,.json" required>
+      <button class="button button-secondary" type="submit">导入规则</button>
+    </form>
+    <a class="button" href="/rules/new">新建规则</a>
+  </div>
 </section>
+
+{% if error %}
+<p class="form-error">{{ error }}</p>
+{% endif %}
+
+{% if notice %}
+<p class="form-success">{{ notice }}</p>
+{% endif %}
 
 <section class="panel">
   <div class="table-shell">

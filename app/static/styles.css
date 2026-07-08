@@ -261,6 +261,18 @@ button:hover {
   align-items: center;
 }
 
+.import-form {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.import-form input[type="file"] {
+  min-height: 38px;
+  max-width: 240px;
+  padding: 7px 10px;
+}
+
 .table-actions {
   display: flex;
   flex-wrap: wrap;
@@ -409,6 +421,14 @@ th {
 
   .filter-actions {
     flex-wrap: wrap;
+  }
+
+  .import-form {
+    flex-wrap: wrap;
+  }
+
+  .import-form input[type="file"] {
+    max-width: 100%;
   }
 
   .page-header {

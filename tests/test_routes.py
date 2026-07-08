@@ -1,4 +1,5 @@
 import importlib
+import json
 
 import pytest
 from fastapi.testclient import TestClient
@@ -357,6 +358,180 @@ def test_rules_page_lists_existing_rules(monkeypatch, session):
         assert "手动执行" in response.text
     finally:
         app.dependency_overrides.clear()
+        get_settings.cache_clear()
+
+
+def test_export_rules_json_includes_data_source_name(monkeypatch, session):
+    data_source = _create_data_source(session)
+    rule = _create_rule(session, data_source, notes="迁移备注")
+    client, get_settings, app = _client_with_admin(monkeypatch, session)
+    try:
+        response = client.get("/rules/export.json")
+
+        assert response.status_code == 200
+        assert response.headers["content-type"].startswith("application/json")
+        assert 'filename="alert-rules.json"' in response.headers["content-disposition"]
+        payload = response.json()
+        assert payload["version"] == 1
+        assert "exported_at" in payload
+        assert payload["rules"][0]["name"] == rule.name
+        assert payload["rules"][0]["data_source_name"] == data_source.name
+        assert payload["rules"][0]["notes"] == "迁移备注"
+        assert payload["rules"][0]["send_mode"] == "summary"
+        assert "data_source_id" not in payload["rules"][0]
+        assert "id" not in payload["rules"][0]
+    finally:
+        app.dependency_overrides.clear()
+        get_settings.cache_clear()
+
+
+def test_export_rules_json_requires_login(monkeypatch):
+    _set_required_settings(monkeypatch)
+    create_app, get_settings = _load_create_app()
+    try:
+        client = TestClient(create_app())
+
+        response = client.get("/rules/export.json")
+
+        assert response.status_code == 401
+    finally:
+        get_settings.cache_clear()
+
+
+def test_import_rules_json_creates_rules(monkeypatch, session):
+    data_source = _create_data_source(session)
+    payload = {
+        "version": 1,
+        "rules": [
+            {
+                "name": "导入规则",
+                "data_source_name": data_source.name,
+                "sql_text": "select id from imported_orders",
+                "cron_expression": "15 8 * * 1-5",
+                "recipients": "ops@example.com",
+                "cc_recipients": "team@example.com",
+                "subject_template": "导入预警",
+                "body_template": "{{table}}",
+                "send_mode": "per_row",
+                "query_timeout_seconds": 45,
+                "max_rows": 100,
+                "enabled": False,
+                "notes": "导入备注",
+            }
+        ],
+    }
+    client, get_settings, app = _client_with_admin(monkeypatch, session)
+    try:
+        response = client.post(
+            "/rules/import",
+            files={"file": ("rules.json", json.dumps(payload), "application/json")},
+            follow_redirects=False,
+        )
+
+        assert response.status_code == 303
+        assert response.headers["location"] == "/rules?imported=1"
+        rule = session.exec(select(AlertRule)).one()
+        assert rule.name == "导入规则"
+        assert rule.data_source_id == data_source.id
+        assert rule.sql_text == "select id from imported_orders"
+        assert rule.cron_expression == "15 8 * * 1-5"
+        assert rule.recipients == "ops@example.com"
+        assert rule.cc_recipients == "team@example.com"
+        assert rule.subject_template == "导入预警"
+        assert rule.body_template == "{{table}}"
+        assert rule.send_mode == SendMode.PER_ROW
+        assert rule.query_timeout_seconds == 45
+        assert rule.max_rows == 100
+        assert rule.enabled is False
+        assert rule.notes == "导入备注"
+    finally:
+        app.dependency_overrides.clear()
+        get_settings.cache_clear()
+
+
+def test_import_rules_json_rejects_unknown_data_source_without_saving(monkeypatch, session):
+    _create_data_source(session)
+    payload = {
+        "version": 1,
+        "rules": [
+            {
+                "name": "导入规则",
+                "data_source_name": "不存在的数据源",
+                "sql_text": "select id from imported_orders",
+                "cron_expression": "15 8 * * 1-5",
+                "recipients": "ops@example.com",
+                "subject_template": "导入预警",
+                "body_template": "{{table}}",
+                "send_mode": "summary",
+                "query_timeout_seconds": 30,
+                "max_rows": 500,
+                "enabled": True,
+            }
+        ],
+    }
+    client, get_settings, app = _client_with_admin(monkeypatch, session)
+    try:
+        response = client.post(
+            "/rules/import",
+            files={"file": ("rules.json", json.dumps(payload), "application/json")},
+        )
+
+        assert response.status_code == 400
+        assert "第 1 条规则的数据源不存在" in response.text
+        assert session.exec(select(AlertRule)).all() == []
+    finally:
+        app.dependency_overrides.clear()
+        get_settings.cache_clear()
+
+
+def test_import_rules_json_rejects_unsafe_sql_without_saving(monkeypatch, session):
+    data_source = _create_data_source(session)
+    payload = {
+        "version": 1,
+        "rules": [
+            {
+                "name": "导入规则",
+                "data_source_name": data_source.name,
+                "sql_text": "delete from imported_orders",
+                "cron_expression": "15 8 * * 1-5",
+                "recipients": "ops@example.com",
+                "subject_template": "导入预警",
+                "body_template": "{{table}}",
+                "send_mode": "summary",
+                "query_timeout_seconds": 30,
+                "max_rows": 500,
+                "enabled": True,
+            }
+        ],
+    }
+    client, get_settings, app = _client_with_admin(monkeypatch, session)
+    try:
+        response = client.post(
+            "/rules/import",
+            files={"file": ("rules.json", json.dumps(payload), "application/json")},
+        )
+
+        assert response.status_code == 400
+        assert "第 1 条规则 SQL 无效：只允许 SELECT 查询" in response.text
+        assert session.exec(select(AlertRule)).all() == []
+    finally:
+        app.dependency_overrides.clear()
+        get_settings.cache_clear()
+
+
+def test_import_rules_json_requires_login(monkeypatch):
+    _set_required_settings(monkeypatch)
+    create_app, get_settings = _load_create_app()
+    try:
+        client = TestClient(create_app())
+
+        response = client.post(
+            "/rules/import",
+            files={"file": ("rules.json", json.dumps({"version": 1, "rules": []}), "application/json")},
+        )
+
+        assert response.status_code == 401
+    finally:
         get_settings.cache_clear()
 
 

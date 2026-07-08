@@ -1,8 +1,9 @@
 import csv
+import json
 from io import StringIO
 
 from apscheduler.triggers.cron import CronTrigger
-from fastapi import APIRouter, Depends, Form, HTTPException, Request
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 from fastapi.templating import Jinja2Templates
 from sqlalchemy import or_
@@ -116,6 +117,143 @@ def _rule_to_copy_form(rule: AlertRule) -> dict[str, str]:
     form["name"] = f"{rule.name} 副本"
     form["enabled"] = "on"
     return form
+
+
+def _rules_page_context(
+    request: Request,
+    admin: AdminUser,
+    session: Session,
+    *,
+    error: str = "",
+) -> dict:
+    rules = session.exec(select(AlertRule).order_by(AlertRule.created_at.desc())).all()
+    imported = request.query_params.get("imported", "")
+    notice = f"成功导入 {imported} 条规则" if imported.isdigit() else ""
+    return {
+        "request": request,
+        "admin": admin,
+        "title": "预警规则",
+        "rules": rules,
+        "error": error,
+        "notice": notice,
+    }
+
+
+def _rule_export_payload(session: Session) -> dict:
+    rules = session.exec(select(AlertRule).order_by(AlertRule.created_at.desc())).all()
+    data_sources = {source.id: source.name for source in session.exec(select(SqlDataSource)).all()}
+    return {
+        "version": 1,
+        "exported_at": utc_now().isoformat(),
+        "rules": [
+            {
+                "name": rule.name,
+                "data_source_name": data_sources.get(rule.data_source_id, ""),
+                "sql_text": rule.sql_text,
+                "cron_expression": rule.cron_expression,
+                "recipients": rule.recipients,
+                "cc_recipients": rule.cc_recipients,
+                "subject_template": rule.subject_template,
+                "body_template": rule.body_template,
+                "send_mode": rule.send_mode.value,
+                "query_timeout_seconds": rule.query_timeout_seconds,
+                "max_rows": rule.max_rows,
+                "enabled": rule.enabled,
+                "notes": rule.notes,
+            }
+            for rule in rules
+        ],
+    }
+
+
+def _required_import_text(rule_data: dict, field: str, index: int, label: str) -> str:
+    value = rule_data.get(field, "")
+    if not isinstance(value, str):
+        value = str(value)
+    value = value.strip()
+    if not value:
+        raise ValueError(f"第 {index} 条规则缺少{label}")
+    return value
+
+
+def _optional_import_text(rule_data: dict, field: str) -> str:
+    value = rule_data.get(field, "")
+    return value if isinstance(value, str) else str(value)
+
+
+def _positive_import_int(rule_data: dict, field: str, index: int, label: str, default: int) -> int:
+    value = rule_data.get(field, default)
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"第 {index} 条规则{label}必须是正整数") from exc
+    if parsed <= 0:
+        raise ValueError(f"第 {index} 条规则{label}必须是正整数")
+    return parsed
+
+
+def _build_imported_rules(payload: dict, session: Session) -> list[AlertRule]:
+    if not isinstance(payload, dict) or payload.get("version") != 1:
+        raise ValueError("导入文件格式无效：仅支持 version 1")
+
+    rules_data = payload.get("rules")
+    if not isinstance(rules_data, list):
+        raise ValueError("导入文件格式无效：rules 必须是列表")
+
+    sources_by_name = {source.name: source for source in session.exec(select(SqlDataSource)).all()}
+    imported_rules = []
+    for index, rule_data in enumerate(rules_data, start=1):
+        if not isinstance(rule_data, dict):
+            raise ValueError(f"第 {index} 条规则格式无效")
+
+        name = _required_import_text(rule_data, "name", index, "规则名称")
+        data_source_name = _required_import_text(rule_data, "data_source_name", index, "数据源名称")
+        data_source = sources_by_name.get(data_source_name)
+        if data_source is None:
+            raise ValueError(f"第 {index} 条规则的数据源不存在")
+
+        sql_text = _required_import_text(rule_data, "sql_text", index, "SQL 查询")
+        try:
+            validate_select_only_sql(sql_text)
+        except SqlValidationError as exc:
+            raise ValueError(f"第 {index} 条规则 SQL 无效：{exc}") from exc
+
+        cron_expression = _required_import_text(rule_data, "cron_expression", index, "Cron 表达式")
+        try:
+            CronTrigger.from_crontab(cron_expression)
+        except ValueError as exc:
+            raise ValueError(f"第 {index} 条规则 Cron 表达式无效") from exc
+
+        send_mode_value = _optional_import_text(rule_data, "send_mode") or SendMode.SUMMARY.value
+        try:
+            send_mode = SendMode(send_mode_value)
+        except ValueError as exc:
+            raise ValueError(f"第 {index} 条规则发送方式无效") from exc
+
+        imported_rules.append(
+            AlertRule(
+                name=name,
+                data_source_id=data_source.id,
+                sql_text=sql_text,
+                cron_expression=cron_expression,
+                recipients=_required_import_text(rule_data, "recipients", index, "收件人"),
+                cc_recipients=_optional_import_text(rule_data, "cc_recipients"),
+                subject_template=_optional_import_text(rule_data, "subject_template"),
+                body_template=_optional_import_text(rule_data, "body_template"),
+                send_mode=send_mode,
+                query_timeout_seconds=_positive_import_int(
+                    rule_data,
+                    "query_timeout_seconds",
+                    index,
+                    "查询超时时间",
+                    30,
+                ),
+                max_rows=_positive_import_int(rule_data, "max_rows", index, "最大返回行数", 500),
+                enabled=bool(rule_data.get("enabled", True)),
+                notes=_optional_import_text(rule_data, "notes"),
+            )
+        )
+    return imported_rules
 
 
 def _submitted_rule_form(
@@ -323,12 +461,54 @@ def rules_page(
     admin: AdminUser = Depends(require_admin),
     session: Session = Depends(get_session),
 ):
-    rules = session.exec(select(AlertRule).order_by(AlertRule.created_at.desc())).all()
     return _template_response(
         request,
         "rules.html",
-        {"admin": admin, "title": "预警规则", "rules": rules},
+        _rules_page_context(request, admin, session),
     )
+
+
+@router.get("/rules/export.json")
+def export_rules_json(
+    admin: AdminUser = Depends(require_admin),
+    session: Session = Depends(get_session),
+):
+    _ = admin
+    return JSONResponse(
+        _rule_export_payload(session),
+        headers={"Content-Disposition": 'attachment; filename="alert-rules.json"'},
+    )
+
+
+@router.post("/rules/import")
+async def import_rules_json(
+    request: Request,
+    file: UploadFile = File(...),
+    admin: AdminUser = Depends(require_admin),
+    session: Session = Depends(get_session),
+):
+    try:
+        payload = json.loads((await file.read()).decode("utf-8"))
+        imported_rules = _build_imported_rules(payload, session)
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        return _template_response(
+            request,
+            "rules.html",
+            _rules_page_context(request, admin, session, error="导入文件必须是有效的 JSON"),
+            status_code=400,
+        )
+    except ValueError as exc:
+        return _template_response(
+            request,
+            "rules.html",
+            _rules_page_context(request, admin, session, error=str(exc)),
+            status_code=400,
+        )
+
+    for rule in imported_rules:
+        session.add(rule)
+    session.commit()
+    return RedirectResponse(f"/rules?imported={len(imported_rules)}", status_code=303)
 
 
 @router.get("/rules/new", response_class=HTMLResponse)
