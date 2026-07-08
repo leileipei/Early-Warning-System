@@ -92,6 +92,13 @@ def _rule_to_form(rule: AlertRule) -> dict[str, str]:
     }
 
 
+def _rule_to_copy_form(rule: AlertRule) -> dict[str, str]:
+    form = _rule_to_form(rule)
+    form["name"] = f"{rule.name} 副本"
+    form["enabled"] = "on"
+    return form
+
+
 def _submitted_rule_form(
     name: str,
     data_source_id: str,
@@ -451,6 +458,30 @@ def edit_rule_page(
             form=_rule_to_form(rule),
             action=f"/rules/{rule_id}",
             heading="编辑规则",
+        ),
+    )
+
+
+@router.get("/rules/{rule_id}/copy", response_class=HTMLResponse)
+def copy_rule_page(
+    rule_id: int,
+    request: Request,
+    admin: AdminUser = Depends(require_admin),
+    session: Session = Depends(get_session),
+):
+    rule = session.get(AlertRule, rule_id)
+    if rule is None:
+        raise HTTPException(status_code=404, detail="规则不存在")
+    return _template_response(
+        request,
+        "rule_form.html",
+        _rule_form_context(
+            request,
+            admin,
+            session,
+            form=_rule_to_copy_form(rule),
+            action="/rules",
+            heading="复制规则",
         ),
     )
 

@@ -352,6 +352,8 @@ def test_rules_page_lists_existing_rules(monkeypatch, session):
         rule = session.exec(select(AlertRule)).one()
         assert f"/rules/{rule.id}/run" in response.text
         assert f"/rules/{rule.id}/edit" in response.text
+        assert f"/rules/{rule.id}/copy" in response.text
+        assert "复制" in response.text
         assert "手动执行" in response.text
     finally:
         app.dependency_overrides.clear()
@@ -543,6 +545,46 @@ def test_edit_rule_page_prefills_existing_rule(monkeypatch, session):
         assert "库存预警" in response.text
         assert "select id from stock" in response.text
         assert f'action="/rules/{rule.id}"' in response.text
+    finally:
+        app.dependency_overrides.clear()
+        get_settings.cache_clear()
+
+
+def test_copy_rule_page_prefills_new_rule_form(monkeypatch, session):
+    data_source = _create_data_source(session)
+    rule = _create_rule(
+        session,
+        data_source,
+        name="库存预警",
+        sql_text="select id from stock",
+        cron_expression="15 9 * * 1-5",
+        recipients="ops@example.com",
+        cc_recipients="team@example.com",
+        subject_template="库存 {{row_count}}",
+        body_template="{{table}}",
+        send_mode=SendMode.PER_ROW,
+        query_timeout_seconds=45,
+        max_rows=100,
+        enabled=False,
+    )
+    client, get_settings, app = _client_with_admin(monkeypatch, session)
+    try:
+        response = client.get(f"/rules/{rule.id}/copy")
+
+        assert response.status_code == 200
+        assert "复制规则" in response.text
+        assert "库存预警 副本" in response.text
+        assert "select id from stock" in response.text
+        assert "15 9 * * 1-5" in response.text
+        assert "ops@example.com" in response.text
+        assert "team@example.com" in response.text
+        assert "库存 {{row_count}}" in response.text
+        assert "{{table}}" in response.text
+        assert 'option value="per_row" selected' in response.text
+        assert 'value="45"' in response.text
+        assert 'value="100"' in response.text
+        assert 'action="/rules"' in response.text
+        assert 'name="enabled" type="checkbox" checked' in response.text
     finally:
         app.dependency_overrides.clear()
         get_settings.cache_clear()
