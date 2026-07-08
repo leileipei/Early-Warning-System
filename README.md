@@ -50,3 +50,9 @@ ruff check .
 ## SQL Server 驱动
 
 生产环境需要安装 Microsoft ODBC Driver 18 for SQL Server，并为预警系统配置只读 SQL Server 账号。规则 SQL 只允许 `SELECT` 或 `WITH` 查询。
+
+## 部署运维
+
+生产部署、外部 IP 访问、Web/Worker 进程、ODBC 驱动、SMTP 排查和备份建议见：
+
+[docs/deployment.md](docs/deployment.md)
