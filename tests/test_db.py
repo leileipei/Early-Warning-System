@@ -53,6 +53,8 @@ def test_create_rule_with_sql_server_source(session):
 
     assert rule.id is not None
     assert rule.send_mode == SendMode.SUMMARY
+    assert rule.dynamic_recipient_field == ""
+    assert rule.dynamic_cc_field == ""
 
 
 def test_import_db_without_required_secrets(tmp_path, monkeypatch):
@@ -157,6 +159,46 @@ def test_init_db_adds_duplicate_suppression_columns_to_existing_sqlite_rule_tabl
         "suppression_key_field",
         "suppression_window_hours",
     } <= columns
+
+
+def test_init_db_adds_dynamic_recipient_columns_to_existing_sqlite_rule_table(tmp_path):
+    from app.db import create_db_engine, init_db
+
+    database_path = tmp_path / "legacy_dynamic_recipients.sqlite3"
+    legacy_engine = create_db_engine(f"sqlite:///{database_path}")
+    with legacy_engine.begin() as connection:
+        connection.execute(
+            text(
+                """
+                CREATE TABLE alertrule (
+                    id INTEGER PRIMARY KEY,
+                    name VARCHAR NOT NULL,
+                    data_source_id INTEGER NOT NULL,
+                    sql_text VARCHAR NOT NULL,
+                    cron_expression VARCHAR NOT NULL,
+                    recipients VARCHAR NOT NULL,
+                    cc_recipients VARCHAR NOT NULL,
+                    subject_template VARCHAR NOT NULL,
+                    body_template VARCHAR NOT NULL,
+                    send_mode VARCHAR NOT NULL,
+                    query_timeout_seconds INTEGER NOT NULL,
+                    max_rows INTEGER NOT NULL,
+                    enabled BOOLEAN NOT NULL,
+                    notes VARCHAR NOT NULL,
+                    suppress_duplicates BOOLEAN NOT NULL,
+                    suppression_key_field VARCHAR NOT NULL,
+                    suppression_window_hours INTEGER NOT NULL,
+                    created_at DATETIME NOT NULL,
+                    updated_at DATETIME NOT NULL
+                )
+                """
+            )
+        )
+
+    init_db(legacy_engine)
+
+    columns = {column["name"] for column in inspect(legacy_engine).get_columns("alertrule")}
+    assert {"dynamic_recipient_field", "dynamic_cc_field"} <= columns
 
 
 def test_alert_suppression_persists_for_rule(session):

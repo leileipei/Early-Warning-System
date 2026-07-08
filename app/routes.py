@@ -67,6 +67,10 @@ def _is_checked(value: str | None) -> bool:
     return value in {"on", "true", "1"}
 
 
+def _has_recipient_text(value: str) -> bool:
+    return any(recipient.strip() for recipient in (value or "").replace(";", ",").split(","))
+
+
 def _cipher() -> SecretCipher:
     return SecretCipher.from_key_material(get_settings().secret_key)
 
@@ -109,6 +113,8 @@ def _rule_to_form(rule: AlertRule) -> dict[str, str]:
         "query_timeout_seconds": str(rule.query_timeout_seconds),
         "max_rows": str(rule.max_rows),
         "enabled": "on" if rule.enabled else "",
+        "dynamic_recipient_field": rule.dynamic_recipient_field,
+        "dynamic_cc_field": rule.dynamic_cc_field,
         "suppress_duplicates": "on" if rule.suppress_duplicates else "",
         "suppression_key_field": rule.suppression_key_field,
         "suppression_window_hours": str(rule.suppression_window_hours),
@@ -163,6 +169,8 @@ def _rule_export_payload(session: Session) -> dict:
                 "max_rows": rule.max_rows,
                 "enabled": rule.enabled,
                 "notes": rule.notes,
+                "dynamic_recipient_field": rule.dynamic_recipient_field,
+                "dynamic_cc_field": rule.dynamic_cc_field,
                 "suppress_duplicates": rule.suppress_duplicates,
                 "suppression_key_field": rule.suppression_key_field,
                 "suppression_window_hours": rule.suppression_window_hours,
@@ -235,6 +243,12 @@ def _build_imported_rules(payload: dict, session: Session) -> list[AlertRule]:
             send_mode = SendMode(send_mode_value)
         except ValueError as exc:
             raise ValueError(f"第 {index} 条规则发送方式无效") from exc
+        dynamic_recipient_field = _optional_import_text(rule_data, "dynamic_recipient_field").strip()
+        if dynamic_recipient_field and send_mode != SendMode.PER_ROW:
+            raise ValueError(f"第 {index} 条规则动态收件人字段仅支持每行一封模式")
+        recipients = _optional_import_text(rule_data, "recipients").strip()
+        if not _has_recipient_text(recipients) and not dynamic_recipient_field:
+            raise ValueError(f"第 {index} 条规则缺少收件人或动态收件人字段")
 
         imported_rules.append(
             AlertRule(
@@ -242,7 +256,7 @@ def _build_imported_rules(payload: dict, session: Session) -> list[AlertRule]:
                 data_source_id=data_source.id,
                 sql_text=sql_text,
                 cron_expression=cron_expression,
-                recipients=_required_import_text(rule_data, "recipients", index, "收件人"),
+                recipients=recipients,
                 cc_recipients=_optional_import_text(rule_data, "cc_recipients"),
                 subject_template=_optional_import_text(rule_data, "subject_template"),
                 body_template=_optional_import_text(rule_data, "body_template"),
@@ -257,6 +271,8 @@ def _build_imported_rules(payload: dict, session: Session) -> list[AlertRule]:
                 max_rows=_positive_import_int(rule_data, "max_rows", index, "最大返回行数", 500),
                 enabled=bool(rule_data.get("enabled", True)),
                 notes=_optional_import_text(rule_data, "notes"),
+                dynamic_recipient_field=dynamic_recipient_field,
+                dynamic_cc_field=_optional_import_text(rule_data, "dynamic_cc_field").strip(),
                 suppress_duplicates=bool(rule_data.get("suppress_duplicates", False)),
                 suppression_key_field=_optional_import_text(rule_data, "suppression_key_field").strip(),
                 suppression_window_hours=_positive_import_int(
@@ -286,6 +302,8 @@ def _submitted_rule_form(
     query_timeout_seconds: int,
     max_rows: int,
     enabled: str | None,
+    dynamic_recipient_field: str,
+    dynamic_cc_field: str,
     suppress_duplicates: str | None,
     suppression_key_field: str,
     suppression_window_hours: int,
@@ -303,6 +321,8 @@ def _submitted_rule_form(
         "query_timeout_seconds": str(query_timeout_seconds),
         "max_rows": str(max_rows),
         "enabled": "on" if _is_checked(enabled) else "",
+        "dynamic_recipient_field": dynamic_recipient_field.strip(),
+        "dynamic_cc_field": dynamic_cc_field.strip(),
         "suppress_duplicates": "on" if _is_checked(suppress_duplicates) else "",
         "suppression_key_field": suppression_key_field.strip(),
         "suppression_window_hours": str(suppression_window_hours),
@@ -331,6 +351,40 @@ def _validate_rule_form(
                 admin,
                 session,
                 error=message,
+                form=form,
+                action=action,
+                heading=heading,
+            ),
+            status_code=400,
+        )
+
+    if form.get("dynamic_recipient_field", "").strip() and parsed_send_mode != SendMode.PER_ROW:
+        return None, None, _template_response(
+            request,
+            "rule_form.html",
+            _rule_form_context(
+                request,
+                admin,
+                session,
+                error="动态收件人字段仅支持每行一封模式",
+                form=form,
+                action=action,
+                heading=heading,
+            ),
+            status_code=400,
+        )
+
+    if not _has_recipient_text(form.get("recipients", "")) and not form.get(
+        "dynamic_recipient_field", ""
+    ).strip():
+        return None, None, _template_response(
+            request,
+            "rule_form.html",
+            _rule_form_context(
+                request,
+                admin,
+                session,
+                error="请填写收件人或动态收件人字段",
                 form=form,
                 action=action,
                 heading=heading,
@@ -598,6 +652,8 @@ def create_rule(
     query_timeout_seconds: int = Form(30),
     max_rows: int = Form(500),
     enabled: str | None = Form(None),
+    dynamic_recipient_field: str = Form(""),
+    dynamic_cc_field: str = Form(""),
     suppress_duplicates: str | None = Form(None),
     suppression_key_field: str = Form(""),
     suppression_window_hours: int = Form(24),
@@ -617,6 +673,8 @@ def create_rule(
         query_timeout_seconds,
         max_rows,
         enabled,
+        dynamic_recipient_field,
+        dynamic_cc_field,
         suppress_duplicates,
         suppression_key_field,
         suppression_window_hours,
@@ -645,6 +703,8 @@ def create_rule(
         query_timeout_seconds=query_timeout_seconds,
         max_rows=max_rows,
         enabled=_is_checked(enabled),
+        dynamic_recipient_field=dynamic_recipient_field.strip(),
+        dynamic_cc_field=dynamic_cc_field.strip(),
         suppress_duplicates=_is_checked(suppress_duplicates),
         suppression_key_field=suppression_key_field.strip(),
         suppression_window_hours=suppression_window_hours,
@@ -825,6 +885,8 @@ def update_rule(
     query_timeout_seconds: int = Form(30),
     max_rows: int = Form(500),
     enabled: str | None = Form(None),
+    dynamic_recipient_field: str = Form(""),
+    dynamic_cc_field: str = Form(""),
     suppress_duplicates: str | None = Form(None),
     suppression_key_field: str = Form(""),
     suppression_window_hours: int = Form(24),
@@ -848,6 +910,8 @@ def update_rule(
         query_timeout_seconds,
         max_rows,
         enabled,
+        dynamic_recipient_field,
+        dynamic_cc_field,
         suppress_duplicates,
         suppression_key_field,
         suppression_window_hours,
@@ -875,6 +939,8 @@ def update_rule(
     rule.query_timeout_seconds = query_timeout_seconds
     rule.max_rows = max_rows
     rule.enabled = _is_checked(enabled)
+    rule.dynamic_recipient_field = dynamic_recipient_field.strip()
+    rule.dynamic_cc_field = dynamic_cc_field.strip()
     rule.suppress_duplicates = _is_checked(suppress_duplicates)
     rule.suppression_key_field = suppression_key_field.strip()
     rule.suppression_window_hours = suppression_window_hours

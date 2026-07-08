@@ -46,13 +46,23 @@
       </label>
       <label>
         <span>收件人</span>
-        <input name="recipients" value="{{ form.get('recipients', '') }}" placeholder="ops@example.com" required>
+        <input name="recipients" value="{{ form.get('recipients', '') }}" placeholder="ops@example.com">
       </label>
     </div>
     <label>
       <span>抄送</span>
       <input name="cc_recipients" value="{{ form.get('cc_recipients', '') }}" placeholder="team@example.com">
     </label>
+    <div class="form-row">
+      <label>
+        <span>动态收件人字段</span>
+        <input name="dynamic_recipient_field" value="{{ form.get('dynamic_recipient_field', '') }}" placeholder="例如：owner_email">
+      </label>
+      <label>
+        <span>动态抄送字段</span>
+        <input name="dynamic_cc_field" value="{{ form.get('dynamic_cc_field', '') }}" placeholder="例如：manager_email">
+      </label>
+    </div>
     <label>
       <span>邮件主题</span>
       <input name="subject_template" value="{{ form.get('subject_template', '') }}" required>

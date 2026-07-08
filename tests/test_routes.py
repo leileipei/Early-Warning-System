@@ -351,6 +351,84 @@ def test_create_rule_persists_duplicate_suppression_settings(monkeypatch, sessio
         get_settings.cache_clear()
 
 
+def test_create_rule_persists_dynamic_recipient_fields(monkeypatch, session):
+    data_source = _create_data_source(session)
+    form_data = _valid_rule_form(data_source.id)
+    form_data.update(
+        {
+            "send_mode": "per_row",
+            "dynamic_recipient_field": "owner_email",
+            "dynamic_cc_field": "manager_email",
+        }
+    )
+    client, get_settings, app = _client_with_admin(monkeypatch, session)
+    try:
+        response = client.post("/rules", data=form_data, follow_redirects=False)
+
+        assert response.status_code == 303
+        rule = session.exec(select(AlertRule)).one()
+        assert rule.dynamic_recipient_field == "owner_email"
+        assert rule.dynamic_cc_field == "manager_email"
+    finally:
+        app.dependency_overrides.clear()
+        get_settings.cache_clear()
+
+
+def test_create_rule_rejects_dynamic_recipient_field_for_summary_mode(monkeypatch, session):
+    data_source = _create_data_source(session)
+    form_data = _valid_rule_form(data_source.id)
+    form_data.update({"send_mode": "summary", "dynamic_recipient_field": "owner_email"})
+    client, get_settings, app = _client_with_admin(monkeypatch, session)
+    try:
+        response = client.post("/rules", data=form_data)
+
+        assert response.status_code == 400
+        assert "动态收件人字段仅支持每行一封模式" in response.text
+        assert session.exec(select(AlertRule)).all() == []
+    finally:
+        app.dependency_overrides.clear()
+        get_settings.cache_clear()
+
+
+def test_create_rule_allows_dynamic_recipient_without_fixed_recipients(monkeypatch, session):
+    data_source = _create_data_source(session)
+    form_data = _valid_rule_form(data_source.id)
+    form_data.update(
+        {
+            "send_mode": "per_row",
+            "recipients": "",
+            "dynamic_recipient_field": "owner_email",
+        }
+    )
+    client, get_settings, app = _client_with_admin(monkeypatch, session)
+    try:
+        response = client.post("/rules", data=form_data, follow_redirects=False)
+
+        assert response.status_code == 303
+        rule = session.exec(select(AlertRule)).one()
+        assert rule.recipients == ""
+        assert rule.dynamic_recipient_field == "owner_email"
+    finally:
+        app.dependency_overrides.clear()
+        get_settings.cache_clear()
+
+
+def test_create_rule_rejects_missing_recipients_when_no_dynamic_field(monkeypatch, session):
+    data_source = _create_data_source(session)
+    form_data = _valid_rule_form(data_source.id)
+    form_data.update({"send_mode": "per_row", "recipients": "", "dynamic_recipient_field": ""})
+    client, get_settings, app = _client_with_admin(monkeypatch, session)
+    try:
+        response = client.post("/rules", data=form_data)
+
+        assert response.status_code == 400
+        assert "请填写收件人或动态收件人字段" in response.text
+        assert session.exec(select(AlertRule)).all() == []
+    finally:
+        app.dependency_overrides.clear()
+        get_settings.cache_clear()
+
+
 def test_create_rule_requires_suppression_key_when_enabled(monkeypatch, session):
     data_source = _create_data_source(session)
     form_data = _valid_rule_form(data_source.id)
@@ -407,6 +485,9 @@ def test_export_rules_json_includes_data_source_name(monkeypatch, session):
         session,
         data_source,
         notes="迁移备注",
+        send_mode=SendMode.PER_ROW,
+        dynamic_recipient_field="owner_email",
+        dynamic_cc_field="manager_email",
         suppress_duplicates=True,
         suppression_key_field="order_id",
         suppression_window_hours=12,
@@ -424,7 +505,9 @@ def test_export_rules_json_includes_data_source_name(monkeypatch, session):
         assert payload["rules"][0]["name"] == rule.name
         assert payload["rules"][0]["data_source_name"] == data_source.name
         assert payload["rules"][0]["notes"] == "迁移备注"
-        assert payload["rules"][0]["send_mode"] == "summary"
+        assert payload["rules"][0]["send_mode"] == "per_row"
+        assert payload["rules"][0]["dynamic_recipient_field"] == "owner_email"
+        assert payload["rules"][0]["dynamic_cc_field"] == "manager_email"
         assert payload["rules"][0]["suppress_duplicates"] is True
         assert payload["rules"][0]["suppression_key_field"] == "order_id"
         assert payload["rules"][0]["suppression_window_hours"] == 12
@@ -463,6 +546,8 @@ def test_import_rules_json_creates_rules(monkeypatch, session):
                 "subject_template": "导入预警",
                 "body_template": "{{table}}",
                 "send_mode": "per_row",
+                "dynamic_recipient_field": "owner_email",
+                "dynamic_cc_field": "manager_email",
                 "query_timeout_seconds": 45,
                 "max_rows": 100,
                 "enabled": False,
@@ -493,6 +578,8 @@ def test_import_rules_json_creates_rules(monkeypatch, session):
         assert rule.subject_template == "导入预警"
         assert rule.body_template == "{{table}}"
         assert rule.send_mode == SendMode.PER_ROW
+        assert rule.dynamic_recipient_field == "owner_email"
+        assert rule.dynamic_cc_field == "manager_email"
         assert rule.query_timeout_seconds == 45
         assert rule.max_rows == 100
         assert rule.enabled is False
@@ -500,6 +587,79 @@ def test_import_rules_json_creates_rules(monkeypatch, session):
         assert rule.suppress_duplicates is True
         assert rule.suppression_key_field == "order_id"
         assert rule.suppression_window_hours == 12
+    finally:
+        app.dependency_overrides.clear()
+        get_settings.cache_clear()
+
+
+def test_import_rules_json_allows_dynamic_recipient_without_fixed_recipients(monkeypatch, session):
+    data_source = _create_data_source(session)
+    payload = {
+        "version": 1,
+        "rules": [
+            {
+                "name": "动态收件人导入",
+                "data_source_name": data_source.name,
+                "sql_text": "select id, owner_email from imported_orders",
+                "cron_expression": "15 8 * * 1-5",
+                "recipients": "",
+                "subject_template": "导入预警",
+                "body_template": "{{table}}",
+                "send_mode": "per_row",
+                "dynamic_recipient_field": "owner_email",
+                "query_timeout_seconds": 45,
+                "max_rows": 100,
+                "enabled": True,
+            }
+        ],
+    }
+    client, get_settings, app = _client_with_admin(monkeypatch, session)
+    try:
+        response = client.post(
+            "/rules/import",
+            files={"file": ("rules.json", json.dumps(payload), "application/json")},
+            follow_redirects=False,
+        )
+
+        assert response.status_code == 303
+        rule = session.exec(select(AlertRule)).one()
+        assert rule.recipients == ""
+        assert rule.dynamic_recipient_field == "owner_email"
+    finally:
+        app.dependency_overrides.clear()
+        get_settings.cache_clear()
+
+
+def test_import_rules_json_rejects_missing_recipients_and_dynamic_field(monkeypatch, session):
+    data_source = _create_data_source(session)
+    payload = {
+        "version": 1,
+        "rules": [
+            {
+                "name": "无收件人导入",
+                "data_source_name": data_source.name,
+                "sql_text": "select id from imported_orders",
+                "cron_expression": "15 8 * * 1-5",
+                "recipients": "",
+                "subject_template": "导入预警",
+                "body_template": "{{table}}",
+                "send_mode": "per_row",
+                "query_timeout_seconds": 45,
+                "max_rows": 100,
+                "enabled": True,
+            }
+        ],
+    }
+    client, get_settings, app = _client_with_admin(monkeypatch, session)
+    try:
+        response = client.post(
+            "/rules/import",
+            files={"file": ("rules.json", json.dumps(payload), "application/json")},
+        )
+
+        assert response.status_code == 400
+        assert "第 1 条规则缺少收件人或动态收件人字段" in response.text
+        assert session.exec(select(AlertRule)).all() == []
     finally:
         app.dependency_overrides.clear()
         get_settings.cache_clear()
@@ -915,6 +1075,9 @@ def test_edit_rule_page_prefills_existing_rule(monkeypatch, session):
         data_source,
         name="库存预警",
         sql_text="select id from stock",
+        send_mode=SendMode.PER_ROW,
+        dynamic_recipient_field="owner_email",
+        dynamic_cc_field="manager_email",
         suppress_duplicates=True,
         suppression_key_field="stock_id",
         suppression_window_hours=8,
@@ -928,6 +1091,8 @@ def test_edit_rule_page_prefills_existing_rule(monkeypatch, session):
         assert "库存预警" in response.text
         assert "select id from stock" in response.text
         assert f'action="/rules/{rule.id}"' in response.text
+        assert 'name="dynamic_recipient_field" value="owner_email"' in response.text
+        assert 'name="dynamic_cc_field" value="manager_email"' in response.text
         assert 'name="suppress_duplicates" type="checkbox" checked' in response.text
         assert 'name="suppression_key_field" value="stock_id"' in response.text
         assert 'name="suppression_window_hours" type="number" value="8"' in response.text
@@ -949,6 +1114,8 @@ def test_copy_rule_page_prefills_new_rule_form(monkeypatch, session):
         subject_template="库存 {{row_count}}",
         body_template="{{table}}",
         send_mode=SendMode.PER_ROW,
+        dynamic_recipient_field="owner_email",
+        dynamic_cc_field="manager_email",
         query_timeout_seconds=45,
         max_rows=100,
         enabled=False,
@@ -964,6 +1131,8 @@ def test_copy_rule_page_prefills_new_rule_form(monkeypatch, session):
         assert "15 9 * * 1-5" in response.text
         assert "ops@example.com" in response.text
         assert "team@example.com" in response.text
+        assert 'name="dynamic_recipient_field" value="owner_email"' in response.text
+        assert 'name="dynamic_cc_field" value="manager_email"' in response.text
         assert "库存 {{row_count}}" in response.text
         assert "{{table}}" in response.text
         assert 'option value="per_row" selected' in response.text
@@ -1002,6 +1171,8 @@ def test_update_rule_persists_changes(monkeypatch, session):
             "subject_template": "更新主题",
             "body_template": "更新正文 {{table}}",
             "send_mode": "per_row",
+            "dynamic_recipient_field": "owner_email",
+            "dynamic_cc_field": "manager_email",
             "query_timeout_seconds": "45",
             "max_rows": "100",
             "suppress_duplicates": "on",
@@ -1026,6 +1197,8 @@ def test_update_rule_persists_changes(monkeypatch, session):
         assert rule.subject_template == "更新主题"
         assert rule.body_template == "更新正文 {{table}}"
         assert rule.send_mode == SendMode.PER_ROW
+        assert rule.dynamic_recipient_field == "owner_email"
+        assert rule.dynamic_cc_field == "manager_email"
         assert rule.query_timeout_seconds == 45
         assert rule.max_rows == 100
         assert rule.enabled is False

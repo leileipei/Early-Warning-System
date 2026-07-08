@@ -33,6 +33,7 @@
           <th>调度</th>
           <th>状态</th>
           <th>发送方式</th>
+          <th>动态收件人</th>
           <th>重复抑制</th>
           <th>操作</th>
         </tr>
@@ -44,6 +45,7 @@
           <td>{{ rule.cron_expression }}</td>
           <td>{{ "启用" if rule.enabled else "停用" }}</td>
           <td>{{ "汇总一封" if rule.send_mode == "summary" else "每行一封" }}</td>
+          <td>{{ rule.dynamic_recipient_field if rule.dynamic_recipient_field else "未启用" }}</td>
           <td>
             {% if rule.suppress_duplicates %}
             {{ rule.suppression_key_field }} / {{ rule.suppression_window_hours }} 小时
@@ -63,7 +65,7 @@
         </tr>
         {% else %}
         <tr>
-          <td colspan="6" class="empty-cell">暂无规则</td>
+          <td colspan="7" class="empty-cell">暂无规则</td>
         </tr>
         {% endfor %}
       </tbody>

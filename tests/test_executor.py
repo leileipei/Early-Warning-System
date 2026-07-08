@@ -179,6 +179,131 @@ def test_per_row_mode_sends_one_email_per_row():
     assert [message.html_body for message in mailer.messages] == ["金额 100", "金额 200"]
 
 
+def test_per_row_mode_uses_dynamic_recipients_from_row():
+    mailer = FakeMailer()
+    executor = RuleExecutor(
+        sql_client=FakeSqlClient(
+            [
+                {
+                    "id": 1,
+                    "amount": 100,
+                    "owner_email": "owner@example.com; backup@example.com",
+                    "manager_email": "manager@example.com",
+                }
+            ]
+        ),
+        mailer=mailer,
+    )
+
+    result = executor.execute(
+        make_rule(
+            SendMode.PER_ROW,
+            recipients="fallback@example.com",
+            cc_recipients="team@example.com",
+            dynamic_recipient_field="owner_email",
+            dynamic_cc_field="manager_email",
+            subject_template="订单 {{id}}",
+            body_template="金额 {{amount}}",
+        )
+    )
+
+    assert result.status == ExecutionStatus.SUCCESS
+    assert result.mail_count == 1
+    assert mailer.messages[0].recipients == ["owner@example.com", "backup@example.com"]
+    assert mailer.messages[0].cc_recipients == ["manager@example.com"]
+
+
+def test_per_row_mode_allows_dynamic_recipients_without_fixed_fallback():
+    mailer = FakeMailer()
+    executor = RuleExecutor(
+        sql_client=FakeSqlClient([{"id": 1, "amount": 100, "owner_email": "owner@example.com"}]),
+        mailer=mailer,
+    )
+
+    result = executor.execute(
+        make_rule(
+            SendMode.PER_ROW,
+            recipients="",
+            dynamic_recipient_field="owner_email",
+            subject_template="订单 {{id}}",
+            body_template="金额 {{amount}}",
+        )
+    )
+
+    assert result.status == ExecutionStatus.SUCCESS
+    assert mailer.messages[0].recipients == ["owner@example.com"]
+
+
+def test_per_row_mode_falls_back_to_fixed_recipients_when_dynamic_field_empty():
+    mailer = FakeMailer()
+    executor = RuleExecutor(
+        sql_client=FakeSqlClient([{"id": 1, "amount": 100, "owner_email": "", "manager_email": ""}]),
+        mailer=mailer,
+    )
+
+    result = executor.execute(
+        make_rule(
+            SendMode.PER_ROW,
+            recipients="fallback@example.com",
+            cc_recipients="team@example.com",
+            dynamic_recipient_field="owner_email",
+            dynamic_cc_field="manager_email",
+            subject_template="订单 {{id}}",
+            body_template="金额 {{amount}}",
+        )
+    )
+
+    assert result.status == ExecutionStatus.SUCCESS
+    assert mailer.messages[0].recipients == ["fallback@example.com"]
+    assert mailer.messages[0].cc_recipients == ["team@example.com"]
+
+
+def test_summary_mode_ignores_dynamic_recipient_fields():
+    mailer = FakeMailer()
+    executor = RuleExecutor(
+        sql_client=FakeSqlClient(
+            [{"id": 1, "amount": 100, "owner_email": "owner@example.com", "manager_email": "manager@example.com"}]
+        ),
+        mailer=mailer,
+    )
+
+    result = executor.execute(
+        make_rule(
+            SendMode.SUMMARY,
+            recipients="ops@example.com",
+            cc_recipients="team@example.com",
+            dynamic_recipient_field="owner_email",
+            dynamic_cc_field="manager_email",
+        )
+    )
+
+    assert result.status == ExecutionStatus.SUCCESS
+    assert mailer.messages[0].recipients == ["ops@example.com"]
+    assert mailer.messages[0].cc_recipients == ["team@example.com"]
+
+
+def test_per_row_mode_fails_when_dynamic_and_fixed_recipients_empty():
+    mailer = FakeMailer()
+    executor = RuleExecutor(
+        sql_client=FakeSqlClient([{"id": 1, "amount": 100, "owner_email": ""}]),
+        mailer=mailer,
+    )
+
+    result = executor.execute(
+        make_rule(
+            SendMode.PER_ROW,
+            recipients="",
+            dynamic_recipient_field="owner_email",
+            subject_template="订单 {{id}}",
+            body_template="金额 {{amount}}",
+        )
+    )
+
+    assert result.status == ExecutionStatus.FAILED
+    assert "recipients" in result.error_message
+    assert mailer.messages == []
+
+
 def test_no_rows_succeeds_without_sending_email():
     mailer = FakeMailer()
     executor = RuleExecutor(sql_client=FakeSqlClient([]), mailer=mailer)

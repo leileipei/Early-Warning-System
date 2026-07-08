@@ -81,6 +81,8 @@ def migrate_sqlite_schema(engine: Engine) -> None:
 
     existing_rule_columns = {column["name"] for column in inspector.get_columns("alertrule")}
     rule_columns_to_add = {
+        "dynamic_recipient_field": "VARCHAR NOT NULL DEFAULT ''",
+        "dynamic_cc_field": "VARCHAR NOT NULL DEFAULT ''",
         "suppress_duplicates": "BOOLEAN NOT NULL DEFAULT 0",
         "suppression_key_field": "VARCHAR NOT NULL DEFAULT ''",
         "suppression_window_hours": "INTEGER NOT NULL DEFAULT 24",

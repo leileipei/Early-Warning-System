@@ -1,6 +1,6 @@
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from re import split
-from collections.abc import Callable
 from typing import Protocol
 
 from app.mailer import EmailMessage, MailSendResult, SmtpMailer
@@ -112,19 +112,18 @@ class RuleExecutor:
         )
 
     def _build_messages(self, rule: AlertRule, rows: list[dict]) -> list[EmailMessage]:
-        recipients = _parse_recipients(rule.recipients)
-        if not recipients:
-            raise ValueError("recipients must not be empty")
-
-        cc_recipients = _parse_recipients(rule.cc_recipients)
+        fixed_recipients = _parse_recipients(rule.recipients)
+        fixed_cc_recipients = _parse_recipients(rule.cc_recipients)
         context = {"rule_name": rule.name, "rows": rows, "row_count": len(rows)}
 
         if rule.send_mode == SendMode.SUMMARY:
+            if not fixed_recipients:
+                raise ValueError("recipients must not be empty")
             rendered = render_summary(rule.subject_template, rule.body_template, rows, context)
             return [
                 EmailMessage(
-                    recipients=recipients,
-                    cc_recipients=cc_recipients,
+                    recipients=fixed_recipients,
+                    cc_recipients=fixed_cc_recipients,
                     subject=rendered.subject,
                     html_body=rendered.html_body,
                 )
@@ -133,6 +132,10 @@ class RuleExecutor:
         messages = []
         for row in rows:
             rendered = render_per_row(rule.subject_template, rule.body_template, row, context)
+            recipients = _row_recipients(row, rule.dynamic_recipient_field) or fixed_recipients
+            if not recipients:
+                raise ValueError("recipients must not be empty")
+            cc_recipients = _row_recipients(row, rule.dynamic_cc_field) or fixed_cc_recipients
             messages.append(
                 EmailMessage(
                     recipients=recipients,
@@ -169,6 +172,15 @@ class RuleExecutor:
 
 def _parse_recipients(value: str) -> list[str]:
     return [recipient.strip() for recipient in split(r"[,;]", value or "") if recipient.strip()]
+
+
+def _row_recipients(row: dict, field_name: str) -> list[str]:
+    if not field_name:
+        return []
+    value = row.get(field_name)
+    if value is None:
+        return []
+    return _parse_recipients(str(value))
 
 
 def _rule_sql(rule: AlertRule) -> str:
