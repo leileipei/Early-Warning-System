@@ -1,4 +1,6 @@
 import smtplib
+import time
+from dataclasses import replace
 from datetime import datetime
 
 from sqlmodel import Session, select
@@ -66,12 +68,46 @@ def execute_rule_by_id(
     session: Session,
     rule_id: int,
     trigger_type: TriggerType = TriggerType.MANUAL,
+    *,
+    max_attempts: int = 3,
+    retry_delay_seconds: float = 1.0,
+    sleep_fn=time.sleep,
 ) -> ExecutionLog:
     rule = session.get(AlertRule, rule_id)
     if rule is None:
         raise RuleNotFoundError(f"rule {rule_id} not found")
 
     started_at = datetime.utcnow()
+    total_attempts = max(1, max_attempts)
+    result = None
+    attempts_used = 0
+    for attempt in range(1, total_attempts + 1):
+        attempts_used = attempt
+        result = _execute_rule_once(session, rule, trigger_type)
+        if not _is_retryable_result(result) or attempt == total_attempts:
+            break
+        if retry_delay_seconds > 0:
+            sleep_fn(retry_delay_seconds)
+
+    if result is None:
+        result = ExecutionResult(
+            status=ExecutionStatus.FAILED,
+            error_type="RuntimeError",
+            error_message="规则执行失败",
+        )
+
+    result = _with_exhausted_retry_message(result, attempts_used)
+    return persist_execution_result(
+        session=session,
+        rule=rule,
+        trigger_type=trigger_type,
+        result=result,
+        started_at=started_at,
+        finished_at=datetime.utcnow(),
+    )
+
+
+def _execute_rule_once(session: Session, rule: AlertRule, trigger_type: TriggerType) -> ExecutionResult:
     try:
         data_source = _get_enabled_data_source(session, rule)
         smtp_config = _get_enabled_smtp_config(session)
@@ -88,20 +124,33 @@ def execute_rule_by_id(
             error_message=str(exc),
         )
     except Exception as exc:
-        result = ExecutionResult(
+        return ExecutionResult(
             status=ExecutionStatus.FAILED,
             error_type=type(exc).__name__,
             error_message=str(exc) or type(exc).__name__,
         )
 
-    return persist_execution_result(
-        session=session,
-        rule=rule,
-        trigger_type=trigger_type,
-        result=result,
-        started_at=started_at,
-        finished_at=datetime.utcnow(),
-    )
+    return result
+
+
+def _is_retryable_result(result: ExecutionResult) -> bool:
+    if result.status != ExecutionStatus.FAILED:
+        return False
+    return result.error_type in {
+        "ConnectionError",
+        "MailSendError",
+        "OSError",
+        "RuntimeError",
+        "TimeoutError",
+    }
+
+
+def _with_exhausted_retry_message(result: ExecutionResult, attempts_used: int) -> ExecutionResult:
+    retry_count = attempts_used - 1
+    if retry_count <= 0 or not _is_retryable_result(result):
+        return result
+    message = result.error_message or result.error_type or "规则执行失败"
+    return replace(result, error_message=f"{message}（已重试 {retry_count} 次）")
 
 
 def persist_execution_result(

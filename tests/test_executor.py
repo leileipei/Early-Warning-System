@@ -38,6 +38,28 @@ class FakeSqlClient:
         return QueryResult(rows=self.rows)
 
 
+class SequenceSqlClient:
+    def __init__(self, outcomes):
+        self.outcomes = list(outcomes)
+        self.calls = []
+
+    def query(self, sql, timeout_seconds, max_rows):
+        self.calls.append(
+            {
+                "sql": sql,
+                "timeout_seconds": timeout_seconds,
+                "max_rows": max_rows,
+            }
+        )
+        outcome = self.outcomes.pop(0)
+        if isinstance(outcome, Exception):
+            raise outcome
+
+        from app.sql_client import QueryResult
+
+        return QueryResult(rows=outcome)
+
+
 class FakeMailer:
     def __init__(self, results=None, error=None):
         self.messages = []
@@ -326,15 +348,68 @@ def test_execute_rule_by_id_persists_failed_execution_when_sql_client_fails(monk
     )
     monkeypatch.setattr(execution_service, "build_smtp_mailer", lambda config: FakeMailer())
 
-    execution_log = execution_service.execute_rule_by_id(session, rule.id, TriggerType.MANUAL)
+    execution_log = execution_service.execute_rule_by_id(
+        session,
+        rule.id,
+        TriggerType.MANUAL,
+        retry_delay_seconds=0,
+    )
 
     assert execution_log.status == ExecutionStatus.FAILED
     assert execution_log.row_count == 0
     assert execution_log.email_count == 0
     assert execution_log.error_type == "RuntimeError"
-    assert execution_log.error_message == "query timed out"
+    assert execution_log.error_message == "query timed out（已重试 2 次）"
     assert execution_log.duration_ms >= 0
     assert execution_log.finished_at is not None
+    assert session.exec(select(MailLog)).all() == []
+
+
+def test_execute_rule_by_id_retries_transient_sql_failure_then_persists_success(monkeypatch, session):
+    data_source = persist_data_source(session)
+    persist_smtp_config(session)
+    rule = persist_rule(session, data_source)
+    sql_client = SequenceSqlClient([RuntimeError("query timed out"), [{"id": 1, "amount": 100}]])
+    monkeypatch.setattr(execution_service, "build_sql_client", lambda data_source: sql_client)
+    monkeypatch.setattr(execution_service, "build_smtp_mailer", lambda config: FakeMailer())
+
+    execution_log = execution_service.execute_rule_by_id(
+        session,
+        rule.id,
+        TriggerType.MANUAL,
+        retry_delay_seconds=0,
+    )
+
+    assert execution_log.status == ExecutionStatus.SUCCESS
+    assert execution_log.row_count == 1
+    assert execution_log.email_count == 1
+    assert execution_log.error_type == ""
+    assert execution_log.error_message == ""
+    assert len(sql_client.calls) == 2
+    assert session.exec(select(MailLog)).one().status == MailStatus.SUCCESS
+
+
+def test_execute_rule_by_id_persists_one_log_after_exhausting_retries(monkeypatch, session):
+    data_source = persist_data_source(session)
+    persist_smtp_config(session)
+    rule = persist_rule(session, data_source)
+    sql_client = FakeSqlClient(error=RuntimeError("query timed out"))
+    monkeypatch.setattr(execution_service, "build_sql_client", lambda data_source: sql_client)
+    monkeypatch.setattr(execution_service, "build_smtp_mailer", lambda config: FakeMailer())
+
+    execution_log = execution_service.execute_rule_by_id(
+        session,
+        rule.id,
+        TriggerType.MANUAL,
+        retry_delay_seconds=0,
+    )
+
+    execution_logs = session.exec(select(execution_service.ExecutionLog)).all()
+    assert execution_logs == [execution_log]
+    assert execution_log.status == ExecutionStatus.FAILED
+    assert execution_log.error_type == "RuntimeError"
+    assert execution_log.error_message == "query timed out（已重试 2 次）"
+    assert len(sql_client.calls) == 3
     assert session.exec(select(MailLog)).all() == []
 
 
@@ -358,7 +433,12 @@ def test_execute_rule_by_id_persists_partial_mail_results(monkeypatch, session):
         ),
     )
 
-    execution_log = execution_service.execute_rule_by_id(session, rule.id, TriggerType.MANUAL)
+    execution_log = execution_service.execute_rule_by_id(
+        session,
+        rule.id,
+        TriggerType.MANUAL,
+        retry_delay_seconds=0,
+    )
 
     assert execution_log.status == ExecutionStatus.PARTIAL_FAILED
     assert execution_log.row_count == 2
@@ -369,18 +449,27 @@ def test_execute_rule_by_id_persists_partial_mail_results(monkeypatch, session):
     assert [mail_log.subject for mail_log in mail_logs] == ["预警 大额订单", "预警 大额订单"]
     assert mail_logs[0].recipients == "ops@example.com"
     assert mail_logs[1].error_message == "smtp rejected"
+    assert len(mail_logs) == 2
 
 
-def test_execute_rule_by_id_persists_failed_log_when_data_source_disabled(session):
+def test_execute_rule_by_id_persists_failed_log_when_data_source_disabled(monkeypatch, session):
     data_source = persist_data_source(session, enabled=False)
     persist_smtp_config(session)
     rule = persist_rule(session, data_source)
+    sleep_calls = []
 
-    execution_log = execution_service.execute_rule_by_id(session, rule.id, TriggerType.MANUAL)
+    execution_log = execution_service.execute_rule_by_id(
+        session,
+        rule.id,
+        TriggerType.MANUAL,
+        sleep_fn=lambda seconds: sleep_calls.append(seconds),
+    )
 
     assert execution_log.status == ExecutionStatus.FAILED
     assert execution_log.error_type == "ConfigurationError"
     assert "数据源" in execution_log.error_message
+    assert "已重试" not in execution_log.error_message
+    assert sleep_calls == []
     assert session.exec(select(MailLog)).all() == []
 
 
@@ -394,9 +483,14 @@ def test_execute_rule_by_id_persists_failed_log_when_builder_raises(monkeypatch,
 
     monkeypatch.setattr(execution_service, "build_sql_client", raise_builder_error)
 
-    execution_log = execution_service.execute_rule_by_id(session, rule.id, TriggerType.MANUAL)
+    execution_log = execution_service.execute_rule_by_id(
+        session,
+        rule.id,
+        TriggerType.MANUAL,
+        retry_delay_seconds=0,
+    )
 
     assert execution_log.status == ExecutionStatus.FAILED
     assert execution_log.error_type == "RuntimeError"
-    assert execution_log.error_message == "cannot decrypt"
+    assert execution_log.error_message == "cannot decrypt（已重试 2 次）"
     assert session.exec(select(MailLog)).all() == []
