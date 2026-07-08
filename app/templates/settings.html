@@ -167,6 +167,7 @@
             <th>发件人</th>
             <th>安全</th>
             <th>状态</th>
+            <th>操作</th>
           </tr>
         </thead>
         <tbody>
@@ -178,10 +179,17 @@
               {% if smtp_config.use_ssl %}SSL{% elif smtp_config.use_tls %}TLS{% else %}无{% endif %}
             </td>
             <td>{{ "启用" if smtp_config.enabled else "停用" }}</td>
+            <td>
+              <div class="table-actions">
+                <form class="inline-form" method="post" action="/settings/smtp/{{ smtp_config.id }}/test">
+                  <button class="button button-secondary" type="submit">测试发送</button>
+                </form>
+              </div>
+            </td>
           </tr>
           {% else %}
           <tr>
-            <td colspan="4" class="empty-cell">暂无 SMTP 配置</td>
+            <td colspan="5" class="empty-cell">暂无 SMTP 配置</td>
           </tr>
           {% endfor %}
         </tbody>

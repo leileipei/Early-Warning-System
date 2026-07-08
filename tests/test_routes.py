@@ -17,6 +17,7 @@ from app.models import (
     SqlDataSource,
     TriggerType,
 )
+from app.mailer import MailSendResult
 from app.sql_client import QueryResult
 
 VALID_FERNET_KEY = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
@@ -409,6 +410,16 @@ class FakeSyntaxSqlClient:
             raise self.error
 
 
+class FakeSmtpMailer:
+    def __init__(self, result=None):
+        self.result = result or MailSendResult(success=True)
+        self.messages = []
+
+    def send(self, message):
+        self.messages.append(message)
+        return self.result
+
+
 def test_validate_rule_sql_accepts_sql_server_syntax(monkeypatch, session):
     data_source = _create_data_source(session)
     fake_client = FakeSyntaxSqlClient()
@@ -694,6 +705,9 @@ def test_settings_page_lists_data_sources_and_smtp_configs(monkeypatch, session)
         assert "测试连接" in response.text
         assert "table-actions" in response.text
         assert "smtp.example.com" in response.text
+        smtp_config = session.exec(select(SmtpConfig)).one()
+        assert f"/settings/smtp/{smtp_config.id}/test" in response.text
+        assert "测试发送" in response.text
         assert "encrypted" not in response.text
     finally:
         app.dependency_overrides.clear()
@@ -745,6 +759,57 @@ def test_test_sql_server_settings_requires_admin_session(monkeypatch):
         client = TestClient(create_app())
 
         response = client.post("/settings/sql-server/1/test")
+
+        assert response.status_code == 401
+    finally:
+        get_settings.cache_clear()
+
+
+def test_test_smtp_settings_reports_success(monkeypatch, session):
+    smtp_config = _create_smtp_config(session)
+    fake_mailer = FakeSmtpMailer()
+    routes = importlib.import_module("app.routes")
+    monkeypatch.setattr(routes, "build_smtp_mailer", lambda config: fake_mailer)
+    client, get_settings, app = _client_with_admin(monkeypatch, session)
+    try:
+        response = client.post(f"/settings/smtp/{smtp_config.id}/test")
+
+        assert response.status_code == 200
+        assert "SMTP 测试邮件发送成功" in response.text
+        assert len(fake_mailer.messages) == 1
+        message = fake_mailer.messages[0]
+        assert message.recipients == [smtp_config.sender]
+        assert message.cc_recipients == []
+        assert "SQL 预警系统 SMTP 测试" in message.subject
+        assert "SMTP 配置已可用" in message.html_body
+    finally:
+        app.dependency_overrides.clear()
+        get_settings.cache_clear()
+
+
+def test_test_smtp_settings_reports_failure(monkeypatch, session):
+    smtp_config = _create_smtp_config(session)
+    fake_mailer = FakeSmtpMailer(MailSendResult(success=False, error_message="auth failed"))
+    routes = importlib.import_module("app.routes")
+    monkeypatch.setattr(routes, "build_smtp_mailer", lambda config: fake_mailer)
+    client, get_settings, app = _client_with_admin(monkeypatch, session)
+    try:
+        response = client.post(f"/settings/smtp/{smtp_config.id}/test")
+
+        assert response.status_code == 400
+        assert "SMTP 测试发送失败：auth failed" in response.text
+    finally:
+        app.dependency_overrides.clear()
+        get_settings.cache_clear()
+
+
+def test_test_smtp_settings_requires_admin_session(monkeypatch):
+    _set_required_settings(monkeypatch)
+    create_app, get_settings = _load_create_app()
+    try:
+        client = TestClient(create_app())
+
+        response = client.post("/settings/smtp/1/test")
 
         assert response.status_code == 401
     finally:

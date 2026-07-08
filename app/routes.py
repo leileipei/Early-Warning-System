@@ -7,7 +7,8 @@ from sqlmodel import Session, select
 from app.auth import require_admin
 from app.crypto import SecretCipher
 from app.db import get_session
-from app.execution_service import build_sql_client, execute_rule_by_id
+from app.execution_service import build_smtp_mailer, build_sql_client, execute_rule_by_id
+from app.mailer import EmailMessage
 from app.models import (
     AdminUser,
     AlertRule,
@@ -754,6 +755,44 @@ def create_smtp_settings(
     session.add(smtp_config)
     session.commit()
     return RedirectResponse("/settings", status_code=303)
+
+
+@router.post("/settings/smtp/{config_id}/test")
+def test_smtp_settings(
+    config_id: int,
+    request: Request,
+    admin: AdminUser = Depends(require_admin),
+    session: Session = Depends(get_session),
+):
+    smtp_config = session.get(SmtpConfig, config_id)
+    if smtp_config is None:
+        raise HTTPException(status_code=404, detail="SMTP 配置不存在")
+
+    message = EmailMessage(
+        recipients=[smtp_config.sender],
+        cc_recipients=[],
+        subject="SQL 预警系统 SMTP 测试",
+        html_body="<p>SMTP 配置已可用。</p>",
+    )
+    result = build_smtp_mailer(smtp_config).send(message)
+    if not result.success:
+        return _template_response(
+            request,
+            "settings.html",
+            _settings_context(
+                request,
+                admin,
+                session,
+                error=f"SMTP 测试发送失败：{result.error_message or '未知错误'}",
+            ),
+            status_code=400,
+        )
+
+    return _template_response(
+        request,
+        "settings.html",
+        _settings_context(request, admin, session, notice="SMTP 测试邮件发送成功"),
+    )
 
 
 @router.get("/logs", response_class=HTMLResponse)
