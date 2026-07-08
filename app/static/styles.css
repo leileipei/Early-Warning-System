@@ -276,6 +276,40 @@ button:hover {
   color: #b42318;
 }
 
+.preview-panel {
+  display: none;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface-muted);
+  padding: 12px;
+}
+
+.preview-panel:not(:empty) {
+  display: block;
+}
+
+.preview-panel p {
+  margin: 0 0 10px;
+  font-weight: 600;
+}
+
+.preview-panel.is-success {
+  border-color: #abefc6;
+  background: #f6fef9;
+}
+
+.preview-panel.is-error {
+  border-color: #fecdca;
+  background: #fffbfa;
+  color: var(--danger);
+  font-weight: 600;
+}
+
+.preview-table {
+  min-width: 0;
+  background: var(--surface);
+}
+
 .table-shell {
   overflow-x: auto;
 }

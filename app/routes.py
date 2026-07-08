@@ -438,6 +438,62 @@ def validate_rule_sql(
     return {"valid": True, "message": "SQL Server 语法检测通过"}
 
 
+@router.post("/rules/preview-sql")
+def preview_rule_sql(
+    data_source_id: str = Form(""),
+    sql_text: str = Form(""),
+    query_timeout_seconds: int = Form(30),
+    admin: AdminUser = Depends(require_admin),
+    session: Session = Depends(get_session),
+):
+    _ = admin
+    if not data_source_id:
+        return JSONResponse(
+            {"success": False, "message": "请先选择数据源"},
+            status_code=400,
+        )
+
+    try:
+        validate_select_only_sql(sql_text)
+    except SqlValidationError as exc:
+        return JSONResponse(
+            {"success": False, "message": str(exc)},
+            status_code=400,
+        )
+
+    try:
+        source_id = int(data_source_id)
+    except ValueError:
+        return JSONResponse(
+            {"success": False, "message": "请选择有效的数据源"},
+            status_code=400,
+        )
+
+    data_source = session.get(SqlDataSource, source_id)
+    if data_source is None:
+        return JSONResponse(
+            {"success": False, "message": "请选择有效的数据源"},
+            status_code=400,
+        )
+
+    try:
+        preview = build_sql_client(data_source).query(
+            sql_text,
+            timeout_seconds=query_timeout_seconds,
+            max_rows=5,
+        )
+    except Exception as exc:
+        return JSONResponse(
+            {"success": False, "message": f"预览失败：{exc}"},
+            status_code=400,
+        )
+
+    rows = preview.rows
+    columns = list(rows[0].keys()) if rows else []
+    message = f"查询成功，返回 {len(rows)} 行预览结果" if rows else "查询成功，暂无结果"
+    return {"success": True, "message": message, "columns": columns, "rows": rows}
+
+
 @router.get("/rules/{rule_id}/edit", response_class=HTMLResponse)
 def edit_rule_page(
     rule_id: int,

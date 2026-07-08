@@ -35,8 +35,10 @@
     </label>
     <div class="sql-check-row">
       <button class="button button-secondary" type="button" data-sql-check-button data-endpoint="/rules/validate-sql">检测 SQL</button>
+      <button class="button button-secondary" type="button" data-sql-preview-button data-endpoint="/rules/preview-sql">预览结果</button>
       <span class="field-feedback" data-sql-check-result role="status" aria-live="polite"></span>
     </div>
+    <div class="preview-panel" data-sql-preview-result aria-live="polite"></div>
     <div class="form-row">
       <label>
         <span>Cron 表达式</span>

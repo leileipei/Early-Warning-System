@@ -384,14 +384,18 @@ def test_new_rule_page_renders_sql_check_button(monkeypatch, session):
         assert "检测 SQL" in response.text
         assert 'data-sql-check-button' in response.text
         assert 'data-endpoint="/rules/validate-sql"' in response.text
+        assert "预览结果" in response.text
+        assert 'data-sql-preview-button' in response.text
+        assert 'data-endpoint="/rules/preview-sql"' in response.text
     finally:
         app.dependency_overrides.clear()
         get_settings.cache_clear()
 
 
 class FakeSyntaxSqlClient:
-    def __init__(self, error=None):
+    def __init__(self, error=None, rows=None):
         self.error = error
+        self.rows = rows or []
         self.checked_sql = None
         self.timeout_seconds = None
         self.queried_sql = None
@@ -403,7 +407,7 @@ class FakeSyntaxSqlClient:
         self.max_rows = max_rows
         if self.error is not None:
             raise self.error
-        return QueryResult(rows=[])
+        return QueryResult(rows=self.rows)
 
     def validate_syntax(self, sql, timeout_seconds):
         self.checked_sql = sql
@@ -527,6 +531,146 @@ def test_validate_rule_sql_requires_admin_session(monkeypatch):
         client = TestClient(create_app())
 
         response = client.post("/rules/validate-sql", data={"sql_text": "select 1"})
+
+        assert response.status_code == 401
+    finally:
+        get_settings.cache_clear()
+
+
+def test_preview_rule_sql_returns_limited_rows(monkeypatch, session):
+    data_source = _create_data_source(session)
+    fake_client = FakeSyntaxSqlClient(rows=[{"id": 1, "amount": 120}, {"id": 2, "amount": 300}])
+    routes = importlib.import_module("app.routes")
+    monkeypatch.setattr(routes, "build_sql_client", lambda source: fake_client)
+    client, get_settings, app = _client_with_admin(monkeypatch, session)
+    try:
+        response = client.post(
+            "/rules/preview-sql",
+            data={
+                "data_source_id": str(data_source.id),
+                "sql_text": "select id, amount from orders",
+                "query_timeout_seconds": "12",
+            },
+        )
+
+        assert response.status_code == 200
+        assert response.json() == {
+            "success": True,
+            "message": "查询成功，返回 2 行预览结果",
+            "columns": ["id", "amount"],
+            "rows": [{"id": 1, "amount": 120}, {"id": 2, "amount": 300}],
+        }
+        assert fake_client.queried_sql == "select id, amount from orders"
+        assert fake_client.timeout_seconds == 12
+        assert fake_client.max_rows == 5
+        assert session.exec(select(ExecutionLog)).all() == []
+        assert session.exec(select(MailLog)).all() == []
+    finally:
+        app.dependency_overrides.clear()
+        get_settings.cache_clear()
+
+
+def test_preview_rule_sql_reports_empty_rows(monkeypatch, session):
+    data_source = _create_data_source(session)
+    routes = importlib.import_module("app.routes")
+    monkeypatch.setattr(routes, "build_sql_client", lambda source: FakeSyntaxSqlClient())
+    client, get_settings, app = _client_with_admin(monkeypatch, session)
+    try:
+        response = client.post(
+            "/rules/preview-sql",
+            data={
+                "data_source_id": str(data_source.id),
+                "sql_text": "select id from orders where 1 = 0",
+                "query_timeout_seconds": "12",
+            },
+        )
+
+        assert response.status_code == 200
+        assert response.json() == {
+            "success": True,
+            "message": "查询成功，暂无结果",
+            "columns": [],
+            "rows": [],
+        }
+    finally:
+        app.dependency_overrides.clear()
+        get_settings.cache_clear()
+
+
+def test_preview_rule_sql_rejects_invalid_sql_before_connecting(monkeypatch, session):
+    data_source = _create_data_source(session)
+    routes = importlib.import_module("app.routes")
+    monkeypatch.setattr(
+        routes,
+        "build_sql_client",
+        lambda source: pytest.fail("should not connect when safety validation fails"),
+    )
+    client, get_settings, app = _client_with_admin(monkeypatch, session)
+    try:
+        response = client.post(
+            "/rules/preview-sql",
+            data={
+                "data_source_id": str(data_source.id),
+                "sql_text": "update orders set amount = 1",
+                "query_timeout_seconds": "12",
+            },
+        )
+
+        assert response.status_code == 400
+        assert response.json() == {"success": False, "message": "只允许 SELECT 查询"}
+    finally:
+        app.dependency_overrides.clear()
+        get_settings.cache_clear()
+
+
+def test_preview_rule_sql_requires_data_source(monkeypatch, session):
+    client, get_settings, app = _client_with_admin(monkeypatch, session)
+    try:
+        response = client.post(
+            "/rules/preview-sql",
+            data={"data_source_id": "", "sql_text": "select 1", "query_timeout_seconds": "12"},
+        )
+
+        assert response.status_code == 400
+        assert response.json() == {"success": False, "message": "请先选择数据源"}
+    finally:
+        app.dependency_overrides.clear()
+        get_settings.cache_clear()
+
+
+def test_preview_rule_sql_reports_query_error(monkeypatch, session):
+    data_source = _create_data_source(session)
+    routes = importlib.import_module("app.routes")
+    monkeypatch.setattr(
+        routes,
+        "build_sql_client",
+        lambda source: FakeSyntaxSqlClient(error=RuntimeError("timeout expired")),
+    )
+    client, get_settings, app = _client_with_admin(monkeypatch, session)
+    try:
+        response = client.post(
+            "/rules/preview-sql",
+            data={
+                "data_source_id": str(data_source.id),
+                "sql_text": "select id from orders",
+                "query_timeout_seconds": "12",
+            },
+        )
+
+        assert response.status_code == 400
+        assert response.json() == {"success": False, "message": "预览失败：timeout expired"}
+    finally:
+        app.dependency_overrides.clear()
+        get_settings.cache_clear()
+
+
+def test_preview_rule_sql_requires_admin_session(monkeypatch):
+    _set_required_settings(monkeypatch)
+    create_app, get_settings = _load_create_app()
+    try:
+        client = TestClient(create_app())
+
+        response = client.post("/rules/preview-sql", data={"sql_text": "select 1"})
 
         assert response.status_code == 401
     finally:
