@@ -150,6 +150,27 @@ a {
   gap: 14px;
 }
 
+.form-error,
+.form-success {
+  border: 1px solid;
+  border-radius: 6px;
+  margin: 0 0 16px;
+  padding: 10px 12px;
+  font-weight: 600;
+}
+
+.form-error {
+  border-color: #fecdca;
+  background: #fffbfa;
+  color: var(--danger);
+}
+
+.form-success {
+  border-color: #abefc6;
+  background: #f6fef9;
+  color: #067647;
+}
+
 label {
   display: grid;
   gap: 6px;
@@ -220,6 +241,17 @@ button:hover {
   display: flex;
   gap: 10px;
   align-items: center;
+}
+
+.table-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.inline-form {
+  margin: 0;
 }
 
 .sql-check-row {

@@ -11,6 +11,9 @@
 {% if error %}
 <p class="form-error">{{ error }}</p>
 {% endif %}
+{% if notice %}
+<p class="form-success">{{ notice }}</p>
+{% endif %}
 
 <section class="two-column">
   <article class="panel">
@@ -98,7 +101,12 @@
             <td>{{ data_source.database }}</td>
             <td>{{ "启用" if data_source.enabled else "停用" }}</td>
             <td>
-              <a class="button button-secondary" href="/settings/sql-server/{{ data_source.id }}/edit">编辑</a>
+              <div class="table-actions">
+                <form class="inline-form" method="post" action="/settings/sql-server/{{ data_source.id }}/test">
+                  <button class="button button-secondary" type="submit">测试连接</button>
+                </form>
+                <a class="button button-secondary" href="/settings/sql-server/{{ data_source.id }}/edit">编辑</a>
+              </div>
             </td>
           </tr>
           {% else %}

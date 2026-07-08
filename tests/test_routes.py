@@ -391,8 +391,15 @@ class FakeSyntaxSqlClient:
         self.error = error
         self.checked_sql = None
         self.timeout_seconds = None
+        self.queried_sql = None
+        self.max_rows = None
 
     def query(self, sql, timeout_seconds, max_rows):
+        self.queried_sql = sql
+        self.timeout_seconds = timeout_seconds
+        self.max_rows = max_rows
+        if self.error is not None:
+            raise self.error
         return QueryResult(rows=[])
 
     def validate_syntax(self, sql, timeout_seconds):
@@ -683,10 +690,64 @@ def test_settings_page_lists_data_sources_and_smtp_configs(monkeypatch, session)
         assert "生产库" in response.text
         data_source = session.exec(select(SqlDataSource)).one()
         assert f"/settings/sql-server/{data_source.id}/edit" in response.text
+        assert f"/settings/sql-server/{data_source.id}/test" in response.text
+        assert "测试连接" in response.text
+        assert "table-actions" in response.text
         assert "smtp.example.com" in response.text
         assert "encrypted" not in response.text
     finally:
         app.dependency_overrides.clear()
+        get_settings.cache_clear()
+
+
+def test_test_sql_server_settings_reports_success(monkeypatch, session):
+    data_source = _create_data_source(session)
+    fake_client = FakeSyntaxSqlClient()
+    routes = importlib.import_module("app.routes")
+    monkeypatch.setattr(routes, "build_sql_client", lambda source: fake_client)
+    client, get_settings, app = _client_with_admin(monkeypatch, session)
+    try:
+        response = client.post(f"/settings/sql-server/{data_source.id}/test")
+
+        assert response.status_code == 200
+        assert "数据源 生产库 连接成功" in response.text
+        assert fake_client.queried_sql == "select 1 as ok"
+        assert fake_client.timeout_seconds == data_source.connect_timeout_seconds
+        assert fake_client.max_rows == 1
+    finally:
+        app.dependency_overrides.clear()
+        get_settings.cache_clear()
+
+
+def test_test_sql_server_settings_reports_failure(monkeypatch, session):
+    data_source = _create_data_source(session)
+    routes = importlib.import_module("app.routes")
+    monkeypatch.setattr(
+        routes,
+        "build_sql_client",
+        lambda source: FakeSyntaxSqlClient(error=RuntimeError("login failed")),
+    )
+    client, get_settings, app = _client_with_admin(monkeypatch, session)
+    try:
+        response = client.post(f"/settings/sql-server/{data_source.id}/test")
+
+        assert response.status_code == 400
+        assert "连接失败：login failed" in response.text
+    finally:
+        app.dependency_overrides.clear()
+        get_settings.cache_clear()
+
+
+def test_test_sql_server_settings_requires_admin_session(monkeypatch):
+    _set_required_settings(monkeypatch)
+    create_app, get_settings = _load_create_app()
+    try:
+        client = TestClient(create_app())
+
+        response = client.post("/settings/sql-server/1/test")
+
+        assert response.status_code == 401
+    finally:
         get_settings.cache_clear()
 
 

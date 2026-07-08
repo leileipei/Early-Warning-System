@@ -211,6 +211,7 @@ def _settings_context(
     session: Session,
     *,
     error: str = "",
+    notice: str = "",
 ) -> dict:
     data_sources = session.exec(select(SqlDataSource).order_by(SqlDataSource.created_at.desc())).all()
     smtp_configs = session.exec(select(SmtpConfig).order_by(SmtpConfig.updated_at.desc())).all()
@@ -221,6 +222,7 @@ def _settings_context(
         "data_sources": data_sources,
         "smtp_configs": smtp_configs,
         "error": error,
+        "notice": notice,
     }
 
 
@@ -614,6 +616,38 @@ def edit_sql_server_settings_page(
             "action": f"/settings/sql-server/{source_id}",
             "error": "",
         },
+    )
+
+
+@router.post("/settings/sql-server/{source_id}/test")
+def test_sql_server_settings(
+    source_id: int,
+    request: Request,
+    admin: AdminUser = Depends(require_admin),
+    session: Session = Depends(get_session),
+):
+    data_source = session.get(SqlDataSource, source_id)
+    if data_source is None:
+        raise HTTPException(status_code=404, detail="数据源不存在")
+
+    try:
+        build_sql_client(data_source).query(
+            "select 1 as ok",
+            timeout_seconds=data_source.connect_timeout_seconds,
+            max_rows=1,
+        )
+    except Exception as exc:
+        return _template_response(
+            request,
+            "settings.html",
+            _settings_context(request, admin, session, error=f"连接失败：{exc}"),
+            status_code=400,
+        )
+
+    return _template_response(
+        request,
+        "settings.html",
+        _settings_context(request, admin, session, notice=f"数据源 {data_source.name} 连接成功"),
     )
 
 
