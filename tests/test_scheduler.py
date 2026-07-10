@@ -235,3 +235,75 @@ def test_worker_execute_rule_callback_opens_session_and_uses_scheduled_trigger()
 
     assert sessions == ["opened", "closed"]
     assert calls == [("session", 7, worker.TriggerType.SCHEDULED)]
+
+
+def test_worker_sync_rules_once_loads_all_rules_and_calls_synchronizer():
+    worker = importlib.import_module("app.worker")
+    rules = [make_rule(id=1), make_rule(id=2, enabled=False)]
+    synchronizer = Mock()
+
+    class QueryResult:
+        def all(self):
+            return rules
+
+    class FakeSession:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, traceback):
+            return None
+
+        def exec(self, statement):
+            return QueryResult()
+
+    result = worker.sync_rules_once(synchronizer, session_factory=FakeSession)
+
+    assert result is True
+    synchronizer.sync.assert_called_once_with(rules)
+
+
+def test_worker_sync_rules_once_preserves_scheduler_when_database_read_fails():
+    worker = importlib.import_module("app.worker")
+    synchronizer = Mock()
+
+    class FailingSession:
+        def __enter__(self):
+            raise RuntimeError("database is locked")
+
+        def __exit__(self, exc_type, exc, traceback):
+            return None
+
+    result = worker.sync_rules_once(synchronizer, session_factory=FailingSession)
+
+    assert result is False
+    synchronizer.sync.assert_not_called()
+
+
+def test_worker_run_loop_syncs_immediately_then_uses_configured_interval(monkeypatch):
+    worker = importlib.import_module("app.worker")
+    scheduler = Mock()
+    synchronizer = Mock()
+    sync_calls = []
+    sleeps = []
+
+    def sync_once(target):
+        sync_calls.append(target)
+        if len(sync_calls) == 2:
+            raise KeyboardInterrupt
+        return True
+
+    def sleep_fn(seconds):
+        sleeps.append(seconds)
+
+    worker.run_sync_loop(
+        scheduler,
+        synchronizer,
+        interval_seconds=2.5,
+        sync_once=sync_once,
+        sleep_fn=sleep_fn,
+    )
+
+    assert sync_calls == [synchronizer, synchronizer]
+    assert sleeps == [2.5]
+    scheduler.start.assert_called_once_with()
+    scheduler.shutdown.assert_called_once_with()
