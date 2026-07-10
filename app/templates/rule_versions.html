@@ -1,0 +1,62 @@
+{% extends "base.html" %}
+
+{% block content %}
+<section class="page-header">
+  <div>
+    <p class="eyebrow">规则</p>
+    <h1>版本历史</h1>
+  </div>
+  <div class="button-row">
+    <a class="button button-secondary" href="/rules/{{ rule.id }}/edit">编辑规则</a>
+    <a class="button button-secondary" href="/rules">返回</a>
+  </div>
+</section>
+
+<section class="panel">
+  <h2>{{ rule.name }}</h2>
+  <div class="table-shell">
+    <table>
+      <thead>
+        <tr>
+          <th>版本</th>
+          <th>修改人</th>
+          <th>修改时间</th>
+          <th>规则名称</th>
+          <th>调度</th>
+          <th>收件人</th>
+          <th>SQL</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in version_rows %}
+        <tr>
+          <td>#{{ row.version.version_number }}</td>
+          <td>{{ row.version.changed_by }}</td>
+          <td>{{ row.version.changed_at }}</td>
+          <td>{{ row.snapshot.get('name', '') }}</td>
+          <td>{{ row.snapshot.get('cron_expression', '') }}</td>
+          <td>{{ row.snapshot.get('recipients', '') }}</td>
+          <td><code>{{ row.snapshot.get('sql_text', '') }}</code></td>
+        </tr>
+        <tr>
+          <td></td>
+          <td colspan="6">
+            <div class="muted">
+              数据源 ID：{{ row.snapshot.get('data_source_id', '') }} /
+              发送方式：{{ row.snapshot.get('send_mode', '') }} /
+              最大行数：{{ row.snapshot.get('max_rows', '') }} /
+              动态收件人：{{ row.snapshot.get('dynamic_recipient_field', '') or '未启用' }} /
+              重复抑制：{{ '启用' if row.snapshot.get('suppress_duplicates') else '未启用' }}
+            </div>
+          </td>
+        </tr>
+        {% else %}
+        <tr>
+          <td colspan="7" class="empty-cell">暂无版本历史</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endblock %}

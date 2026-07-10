@@ -9,6 +9,7 @@ from sqlmodel import select
 from app.models import (
     AdminUser,
     AlertRule,
+    AlertRuleVersion,
     ExecutionLog,
     ExecutionStatus,
     MailLog,
@@ -472,7 +473,9 @@ def test_rules_page_lists_existing_rules(monkeypatch, session):
         assert f"/rules/{rule.id}/run" in response.text
         assert f"/rules/{rule.id}/edit" in response.text
         assert f"/rules/{rule.id}/copy" in response.text
+        assert f"/rules/{rule.id}/versions" in response.text
         assert "复制" in response.text
+        assert "历史" in response.text
         assert "手动执行" in response.text
     finally:
         app.dependency_overrides.clear()
@@ -1205,6 +1208,174 @@ def test_update_rule_persists_changes(monkeypatch, session):
         assert rule.suppress_duplicates is True
         assert rule.suppression_key_field == "customer_id"
         assert rule.suppression_window_hours == 6
+    finally:
+        app.dependency_overrides.clear()
+        get_settings.cache_clear()
+
+
+def test_update_rule_creates_version_snapshot_before_changes(monkeypatch, session):
+    data_source = _create_data_source(session)
+    rule = _create_rule(
+        session,
+        data_source,
+        name="旧规则",
+        sql_text="select id from old_orders",
+        cron_expression="0 9 * * *",
+        recipients="old@example.com",
+        cc_recipients="old-team@example.com",
+        subject_template="旧主题",
+        body_template="旧正文 {{table}}",
+        send_mode=SendMode.SUMMARY,
+        query_timeout_seconds=30,
+        max_rows=500,
+        enabled=True,
+        dynamic_recipient_field="",
+        dynamic_cc_field="",
+        suppress_duplicates=True,
+        suppression_key_field="order_id",
+        suppression_window_hours=24,
+    )
+    form_data = _valid_rule_form(data_source.id)
+    form_data.update(
+        {
+            "name": "新规则",
+            "sql_text": "select id from new_orders",
+            "recipients": "new@example.com",
+            "subject_template": "新主题",
+            "body_template": "新正文 {{table}}",
+        }
+    )
+    client, get_settings, app = _client_with_admin(monkeypatch, session)
+    try:
+        response = client.post(f"/rules/{rule.id}", data=form_data, follow_redirects=False)
+
+        assert response.status_code == 303
+        version = session.exec(select(AlertRuleVersion)).one()
+        snapshot = json.loads(version.snapshot_json)
+        assert version.rule_id == rule.id
+        assert version.version_number == 1
+        assert version.changed_by == "admin"
+        assert snapshot["id"] == rule.id
+        assert snapshot["name"] == "旧规则"
+        assert snapshot["sql_text"] == "select id from old_orders"
+        assert snapshot["cron_expression"] == "0 9 * * *"
+        assert snapshot["recipients"] == "old@example.com"
+        assert snapshot["cc_recipients"] == "old-team@example.com"
+        assert snapshot["subject_template"] == "旧主题"
+        assert snapshot["body_template"] == "旧正文 {{table}}"
+        assert snapshot["send_mode"] == "summary"
+        assert snapshot["query_timeout_seconds"] == 30
+        assert snapshot["max_rows"] == 500
+        assert snapshot["enabled"] is True
+        assert snapshot["suppress_duplicates"] is True
+        assert snapshot["suppression_key_field"] == "order_id"
+        assert snapshot["suppression_window_hours"] == 24
+        session.refresh(rule)
+        assert rule.name == "新规则"
+        assert rule.sql_text == "select id from new_orders"
+    finally:
+        app.dependency_overrides.clear()
+        get_settings.cache_clear()
+
+
+def test_update_rule_version_numbers_increment(monkeypatch, session):
+    data_source = _create_data_source(session)
+    rule = _create_rule(session, data_source)
+    client, get_settings, app = _client_with_admin(monkeypatch, session)
+    try:
+        first_form = _valid_rule_form(data_source.id)
+        first_form["name"] = "第一次更新"
+        second_form = _valid_rule_form(data_source.id)
+        second_form["name"] = "第二次更新"
+
+        assert client.post(f"/rules/{rule.id}", data=first_form, follow_redirects=False).status_code == 303
+        assert client.post(f"/rules/{rule.id}", data=second_form, follow_redirects=False).status_code == 303
+
+        versions = session.exec(
+            select(AlertRuleVersion).where(AlertRuleVersion.rule_id == rule.id).order_by(AlertRuleVersion.version_number)
+        ).all()
+        assert [version.version_number for version in versions] == [1, 2]
+        assert json.loads(versions[0].snapshot_json)["name"] == "大额订单"
+        assert json.loads(versions[1].snapshot_json)["name"] == "第一次更新"
+    finally:
+        app.dependency_overrides.clear()
+        get_settings.cache_clear()
+
+
+def test_update_rule_invalid_form_does_not_create_version(monkeypatch, session):
+    data_source = _create_data_source(session)
+    rule = _create_rule(session, data_source)
+    form_data = _valid_rule_form(data_source.id)
+    form_data["sql_text"] = "delete from orders"
+    client, get_settings, app = _client_with_admin(monkeypatch, session)
+    try:
+        response = client.post(f"/rules/{rule.id}", data=form_data)
+
+        assert response.status_code == 400
+        assert session.exec(select(AlertRuleVersion)).all() == []
+    finally:
+        app.dependency_overrides.clear()
+        get_settings.cache_clear()
+
+
+def test_rule_versions_page_requires_login(monkeypatch):
+    _set_required_settings(monkeypatch)
+    create_app, get_settings = _load_create_app()
+    try:
+        client = TestClient(create_app())
+
+        response = client.get("/rules/1/versions")
+
+        assert response.status_code == 401
+    finally:
+        get_settings.cache_clear()
+
+
+def test_rule_versions_page_renders_snapshots(monkeypatch, session):
+    data_source = _create_data_source(session)
+    rule = _create_rule(session, data_source, name="当前规则")
+    version = AlertRuleVersion(
+        rule_id=rule.id,
+        version_number=1,
+        changed_by="admin",
+        snapshot_json=json.dumps(
+            {
+                "name": "历史规则",
+                "data_source_id": data_source.id,
+                "sql_text": "select id from old_orders",
+                "cron_expression": "0 7 * * *",
+                "recipients": "old@example.com",
+                "cc_recipients": "team@example.com",
+                "subject_template": "旧主题",
+                "body_template": "旧正文",
+                "send_mode": "summary",
+                "query_timeout_seconds": 30,
+                "max_rows": 500,
+                "enabled": True,
+                "dynamic_recipient_field": "",
+                "dynamic_cc_field": "",
+                "suppress_duplicates": False,
+                "suppression_key_field": "",
+                "suppression_window_hours": 24,
+            },
+            ensure_ascii=False,
+        ),
+    )
+    session.add(version)
+    session.commit()
+    client, get_settings, app = _client_with_admin(monkeypatch, session)
+    try:
+        response = client.get(f"/rules/{rule.id}/versions")
+
+        assert response.status_code == 200
+        assert "版本历史" in response.text
+        assert "当前规则" in response.text
+        assert "#1" in response.text
+        assert "admin" in response.text
+        assert "历史规则" in response.text
+        assert "select id from old_orders" in response.text
+        assert "old@example.com" in response.text
+        assert f"/rules/{rule.id}/edit" in response.text
     finally:
         app.dependency_overrides.clear()
         get_settings.cache_clear()

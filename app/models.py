@@ -104,6 +104,15 @@ class AlertSuppression(SQLModel, table=True):
     hit_count: int = 1
 
 
+class AlertRuleVersion(SQLModel, table=True):
+    id: Optional[int] = Field(default=None, primary_key=True)
+    rule_id: int = Field(foreign_key="alertrule.id", index=True)
+    version_number: int
+    changed_by: str
+    snapshot_json: str
+    changed_at: datetime = Field(default_factory=utc_now)
+
+
 class ExecutionLog(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
     rule_id: int = Field(foreign_key="alertrule.id")

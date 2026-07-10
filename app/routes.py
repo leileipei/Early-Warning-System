@@ -17,6 +17,7 @@ from app.mailer import EmailMessage
 from app.models import (
     AdminUser,
     AlertRule,
+    AlertRuleVersion,
     ExecutionLog,
     ExecutionStatus,
     MailLog,
@@ -69,6 +70,58 @@ def _is_checked(value: str | None) -> bool:
 
 def _has_recipient_text(value: str) -> bool:
     return any(recipient.strip() for recipient in (value or "").replace(";", ",").split(","))
+
+
+def _rule_snapshot(rule: AlertRule) -> dict:
+    return {
+        "id": rule.id,
+        "name": rule.name,
+        "data_source_id": rule.data_source_id,
+        "sql_text": rule.sql_text,
+        "cron_expression": rule.cron_expression,
+        "recipients": rule.recipients,
+        "cc_recipients": rule.cc_recipients,
+        "subject_template": rule.subject_template,
+        "body_template": rule.body_template,
+        "send_mode": rule.send_mode.value,
+        "query_timeout_seconds": rule.query_timeout_seconds,
+        "max_rows": rule.max_rows,
+        "enabled": rule.enabled,
+        "notes": rule.notes,
+        "dynamic_recipient_field": rule.dynamic_recipient_field,
+        "dynamic_cc_field": rule.dynamic_cc_field,
+        "suppress_duplicates": rule.suppress_duplicates,
+        "suppression_key_field": rule.suppression_key_field,
+        "suppression_window_hours": rule.suppression_window_hours,
+        "created_at": rule.created_at.isoformat(),
+        "updated_at": rule.updated_at.isoformat(),
+    }
+
+
+def _next_rule_version_number(session: Session, rule_id: int) -> int:
+    latest_version = session.exec(
+        select(AlertRuleVersion)
+        .where(AlertRuleVersion.rule_id == rule_id)
+        .order_by(AlertRuleVersion.version_number.desc())
+    ).first()
+    return 1 if latest_version is None else latest_version.version_number + 1
+
+
+def _create_rule_version(session: Session, rule: AlertRule, admin: AdminUser) -> AlertRuleVersion:
+    return AlertRuleVersion(
+        rule_id=rule.id,
+        version_number=_next_rule_version_number(session, rule.id),
+        changed_by=admin.username,
+        snapshot_json=json.dumps(_rule_snapshot(rule), ensure_ascii=False),
+    )
+
+
+def _version_snapshot(version: AlertRuleVersion) -> dict:
+    try:
+        snapshot = json.loads(version.snapshot_json)
+    except json.JSONDecodeError:
+        return {"name": "快照无法解析", "sql_text": ""}
+    return snapshot if isinstance(snapshot, dict) else {"name": "快照无法解析", "sql_text": ""}
 
 
 def _cipher() -> SecretCipher:
@@ -845,6 +898,39 @@ def edit_rule_page(
     )
 
 
+@router.get("/rules/{rule_id}/versions", response_class=HTMLResponse)
+def rule_versions_page(
+    rule_id: int,
+    request: Request,
+    admin: AdminUser = Depends(require_admin),
+    session: Session = Depends(get_session),
+):
+    rule = session.get(AlertRule, rule_id)
+    if rule is None:
+        raise HTTPException(status_code=404, detail="规则不存在")
+    versions = session.exec(
+        select(AlertRuleVersion)
+        .where(AlertRuleVersion.rule_id == rule_id)
+        .order_by(AlertRuleVersion.version_number.desc())
+    ).all()
+    return _template_response(
+        request,
+        "rule_versions.html",
+        {
+            "admin": admin,
+            "title": "规则版本历史",
+            "rule": rule,
+            "version_rows": [
+                {
+                    "version": version,
+                    "snapshot": _version_snapshot(version),
+                }
+                for version in versions
+            ],
+        },
+    )
+
+
 @router.get("/rules/{rule_id}/copy", response_class=HTMLResponse)
 def copy_rule_page(
     rule_id: int,
@@ -927,6 +1013,7 @@ def update_rule(
     if error_response is not None:
         return error_response
 
+    session.add(_create_rule_version(session, rule, admin))
     rule.name = name
     rule.data_source_id = source_id
     rule.sql_text = sql_text

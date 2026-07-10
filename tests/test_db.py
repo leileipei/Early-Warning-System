@@ -9,6 +9,7 @@ from sqlmodel import Session, select
 from app.models import (
     AlertRule,
     AlertSuppression,
+    AlertRuleVersion,
     ExecutionLog,
     SendMode,
     SqlDataSource,
@@ -77,6 +78,7 @@ def test_init_db_creates_model_tables(engine):
         "smtpconfig",
         "alertrule",
         "alertsuppression",
+        "alertruleversion",
         "executionlog",
         "maillog",
     } <= table_names
@@ -212,6 +214,25 @@ def test_alert_suppression_persists_for_rule(session):
     assert suppression.rule_id == rule.id
     assert suppression.suppression_key == "order-1001"
     assert suppression.hit_count == 1
+
+
+def test_alert_rule_version_persists_for_rule(session):
+    rule = _create_rule(session)
+    version = AlertRuleVersion(
+        rule_id=rule.id,
+        version_number=1,
+        changed_by="admin",
+        snapshot_json='{"name": "large orders"}',
+    )
+    session.add(version)
+    session.commit()
+    session.refresh(version)
+
+    assert version.id is not None
+    assert version.rule_id == rule.id
+    assert version.version_number == 1
+    assert version.changed_by == "admin"
+    assert version.snapshot_json == '{"name": "large orders"}'
 
 
 def test_sqlite_foreign_keys_are_enforced(session):
