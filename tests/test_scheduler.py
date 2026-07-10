@@ -1,6 +1,9 @@
 import importlib
 from unittest.mock import Mock
 
+import pytest
+from apscheduler.triggers.cron import CronTrigger
+
 from app.models import AlertRule, SendMode
 from app.scheduler import RuleScheduleSynchronizer, build_scheduler
 
@@ -113,6 +116,66 @@ def test_rule_synchronizer_replaces_job_when_cron_changes():
     assert str(scheduler.get_job("rule-7").trigger) != first_trigger
     assert "10" in str(scheduler.get_job("rule-7").trigger)
     assert "30" in str(scheduler.get_job("rule-7").trigger)
+
+
+@pytest.mark.parametrize("start_paused", [False, True], ids=["stopped", "started-paused"])
+def test_rule_synchronizer_preserves_existing_job_when_cron_replacement_fails(start_paused):
+    def execute_rule(rule_id):
+        return None
+
+    scheduler = build_scheduler(
+        [make_rule(id=7, cron_expression="0 9 * * *")],
+        execute_rule=execute_rule,
+    )
+    if start_paused:
+        scheduler.start(paused=True)
+    original_trigger = str(scheduler.get_job("rule-7").trigger)
+    replacement_trigger = str(CronTrigger.from_crontab("30 10 * * *"))
+    real_add_job = scheduler.add_job
+    real_reschedule_job = scheduler.reschedule_job
+    attempts = 0
+
+    def fail_first_replacement(operation, *args, **kwargs):
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            raise RuntimeError("scheduler unavailable")
+        return operation(*args, **kwargs)
+
+    scheduler.add_job = lambda *args, **kwargs: fail_first_replacement(
+        real_add_job, *args, **kwargs
+    )
+    scheduler.reschedule_job = lambda *args, **kwargs: fail_first_replacement(
+        real_reschedule_job, *args, **kwargs
+    )
+    synchronizer = RuleScheduleSynchronizer(scheduler, execute_rule=execute_rule)
+
+    try:
+        synchronizer.sync([make_rule(id=7, cron_expression="30 10 * * *")])
+
+        retained_job = scheduler.get_job("rule-7")
+        assert retained_job is not None
+        assert retained_job.id == "rule-7"
+        assert retained_job.func is execute_rule
+        assert list(retained_job.args) == [7]
+        assert retained_job.max_instances == 1
+        assert retained_job.coalesce is True
+        assert str(retained_job.trigger) == original_trigger
+
+        synchronizer.sync([make_rule(id=7, cron_expression="30 10 * * *")])
+
+        replacement_job = scheduler.get_job("rule-7")
+        assert attempts == 2
+        assert replacement_job is not None
+        assert replacement_job.id == "rule-7"
+        assert replacement_job.func is execute_rule
+        assert list(replacement_job.args) == [7]
+        assert replacement_job.max_instances == 1
+        assert replacement_job.coalesce is True
+        assert str(replacement_job.trigger) == replacement_trigger
+    finally:
+        if start_paused:
+            scheduler.shutdown(wait=False)
 
 
 def test_rule_synchronizer_removes_disabled_or_deleted_rules():
@@ -279,7 +342,7 @@ def test_worker_sync_rules_once_preserves_scheduler_when_database_read_fails():
     synchronizer.sync.assert_not_called()
 
 
-def test_worker_run_loop_syncs_immediately_then_uses_configured_interval(monkeypatch):
+def test_worker_run_loop_syncs_immediately_then_uses_configured_interval():
     worker = importlib.import_module("app.worker")
     scheduler = Mock()
     synchronizer = Mock()

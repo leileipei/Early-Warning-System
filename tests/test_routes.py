@@ -230,8 +230,8 @@ def test_scheduler_sync_interval_reads_environment(monkeypatch):
     assert settings.scheduler_sync_interval_seconds == 2.5
 
 
-@pytest.mark.parametrize("value", ["0", "-1"])
-def test_scheduler_sync_interval_rejects_non_positive_values(value, monkeypatch):
+@pytest.mark.parametrize("value", ["0", "-1", "inf", "-inf", "nan"])
+def test_scheduler_sync_interval_rejects_non_finite_or_non_positive_values(value, monkeypatch):
     from pydantic import ValidationError
     from app.settings import Settings
 

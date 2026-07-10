@@ -83,9 +83,13 @@ class RuleScheduleSynchronizer:
                 unchanged = self.known_cron_by_rule_id.get(rule_id) == cron_signature
                 if unchanged and job is not None:
                     continue
-                if job is not None:
-                    self.scheduler.remove_job(_job_id(rule_id))
-                _add_rule_job(self.scheduler, rule, self.execute_rule)
+                if job is None:
+                    _add_rule_job(self.scheduler, rule, self.execute_rule)
+                else:
+                    self.scheduler.reschedule_job(
+                        _job_id(rule_id),
+                        trigger=CronTrigger.from_crontab(rule.cron_expression),
+                    )
             except Exception:
                 self.logger.exception("同步规则调度任务失败: rule_id=%s", rule_id)
             else:

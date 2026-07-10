@@ -10,7 +10,7 @@ class Settings(BaseSettings):
 
     app_name: str = "SQL 预警系统"
     database_url: str = "sqlite:///./early_warning.sqlite3"
-    scheduler_sync_interval_seconds: float = Field(default=10.0, gt=0)
+    scheduler_sync_interval_seconds: float = Field(default=10.0, gt=0, allow_inf_nan=False)
     session_secret: str
     secret_key: str
 
