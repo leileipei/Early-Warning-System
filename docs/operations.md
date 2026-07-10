@@ -220,6 +220,8 @@ python3 -m app.worker
 - Cron 表达式是否符合预期时区。
 - Web 和 Worker 是否使用同一数据库。
 - 规则最近是否被编辑或导入为停用状态。
+- Worker 会按 `SCHEDULER_SYNC_INTERVAL_SECONDS` 周期同步规则；修改后请等待至少一个同步周期。
+- 如果 Worker 日志出现“读取预警规则失败”，检查 SQLite 文件权限和并发锁定情况；已有任务会保留，系统会在下一周期重试。
 
 ### 7.4 SQL Server 连接失败
 

@@ -62,7 +62,12 @@ APP_NAME=SQL 预警系统
 DATABASE_URL=sqlite:///./early_warning.sqlite3
 SESSION_SECRET=REPLACE_ME_WITH_RANDOM_SESSION_SECRET
 SECRET_KEY=REPLACE_ME_WITH_32_BYTE_URL_SAFE_FERNET_KEY
+SCHEDULER_SYNC_INTERVAL_SECONDS=10
 ```
+
+### SCHEDULER_SYNC_INTERVAL_SECONDS
+
+该值必须大于零，默认值为 10 秒，用于控制运行中的 Worker 多快反映规则变化。
 
 ### SESSION_SECRET
 
@@ -194,6 +199,7 @@ python3 -m app.worker
 - Worker 负责定时执行。
 - 如果 Worker 没有运行，Cron 规则不会自动触发。
 - 手动执行规则不依赖 Worker。
+- 新建规则、修改 Cron、启用或停用规则后无需重启 Worker。
 
 ## 11. 推荐生产运行方式
 

@@ -38,7 +38,7 @@ uvicorn app.main:app --reload
 python -m app.worker
 ```
 
-Worker 会加载启用的规则并按 cron 调度执行。Web 页面也支持在规则列表中手动执行规则。
+Worker 会按 Cron 调度启用规则，并默认每 10 秒从系统数据库同步规则变化。后台新增规则、修改 Cron、启用或停用规则后无需重启 Worker。可通过 `.env` 中的 `SCHEDULER_SYNC_INTERVAL_SECONDS` 调整同步间隔。
 
 ## 测试
 
