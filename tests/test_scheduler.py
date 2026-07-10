@@ -87,6 +87,21 @@ def test_rule_synchronizer_adds_new_rule_without_rescheduling_unchanged_rule():
     assert scheduler.get_job("rule-7") is not None
 
 
+def test_rule_synchronizer_adopts_existing_unchanged_job_without_rescheduling():
+    def execute_rule(rule_id):
+        return None
+
+    scheduler = build_scheduler([make_rule(id=7)], execute_rule=execute_rule)
+    add_job = Mock(wraps=scheduler.add_job)
+    scheduler.add_job = add_job
+    synchronizer = RuleScheduleSynchronizer(scheduler, execute_rule=execute_rule)
+
+    synchronizer.sync([make_rule(id=7)])
+
+    assert add_job.call_count == 0
+    assert scheduler.get_job("rule-7") is not None
+
+
 def test_rule_synchronizer_replaces_job_when_cron_changes():
     scheduler = build_scheduler([], execute_rule=lambda rule_id: None)
     synchronizer = RuleScheduleSynchronizer(scheduler, execute_rule=lambda rule_id: None)
@@ -104,6 +119,22 @@ def test_rule_synchronizer_removes_disabled_or_deleted_rules():
     scheduler = build_scheduler([], execute_rule=lambda rule_id: None)
     synchronizer = RuleScheduleSynchronizer(scheduler, execute_rule=lambda rule_id: None)
     synchronizer.sync([make_rule(id=7), make_rule(id=8)])
+
+    synchronizer.sync([make_rule(id=7, enabled=False)])
+
+    assert scheduler.get_job("rule-7") is None
+    assert scheduler.get_job("rule-8") is None
+
+
+def test_rule_synchronizer_removes_preexisting_disabled_or_deleted_rules():
+    def execute_rule(rule_id):
+        return None
+
+    scheduler = build_scheduler(
+        [make_rule(id=7), make_rule(id=8)],
+        execute_rule=execute_rule,
+    )
+    synchronizer = RuleScheduleSynchronizer(scheduler, execute_rule=execute_rule)
 
     synchronizer.sync([make_rule(id=7, enabled=False)])
 
@@ -142,6 +173,35 @@ def test_rule_synchronizer_retries_failed_rule_without_blocking_other_rules():
 
     synchronizer.sync([make_rule(id=1), make_rule(id=2)])
     assert scheduler.get_job("rule-1") is not None
+
+
+def test_rule_synchronizer_isolates_get_job_failure_and_retries_rule():
+    scheduler = build_scheduler([], execute_rule=lambda rule_id: None)
+    logger = Mock()
+    synchronizer = RuleScheduleSynchronizer(
+        scheduler,
+        execute_rule=lambda rule_id: None,
+        logger=logger,
+    )
+    synchronizer.sync([make_rule(id=1)])
+    real_get_job = scheduler.get_job
+    attempts = {"rule-1": 0}
+
+    def flaky_get_job(job_id):
+        if job_id == "rule-1":
+            attempts[job_id] += 1
+            if attempts[job_id] == 1:
+                raise RuntimeError("scheduler unavailable")
+        return real_get_job(job_id)
+
+    scheduler.get_job = flaky_get_job
+
+    synchronizer.sync([make_rule(id=1), make_rule(id=2)])
+    assert real_get_job("rule-2") is not None
+
+    synchronizer.sync([make_rule(id=1), make_rule(id=2)])
+    assert attempts["rule-1"] == 2
+    logger.exception.assert_called_once_with("同步规则调度任务失败: rule_id=%s", 1)
 
 
 def test_worker_import_does_not_block():

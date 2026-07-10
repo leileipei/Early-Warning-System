@@ -24,6 +24,19 @@ def _job_id(rule_id: int) -> str:
     return f"rule-{rule_id}"
 
 
+def _rule_id_from_job_id(job_id: str) -> int | None:
+    if not job_id.startswith("rule-"):
+        return None
+    try:
+        return int(job_id.removeprefix("rule-"))
+    except ValueError:
+        return None
+
+
+def _cron_signature(cron_expression: str) -> str:
+    return str(CronTrigger.from_crontab(cron_expression))
+
+
 def _add_rule_job(
     scheduler,
     rule: AlertRule,
@@ -46,6 +59,10 @@ class RuleScheduleSynchronizer:
         self.execute_rule = execute_rule
         self.logger = logger or logging.getLogger(__name__)
         self.known_cron_by_rule_id: dict[int, str] = {}
+        for job in scheduler.get_jobs():
+            rule_id = _rule_id_from_job_id(job.id)
+            if rule_id is not None:
+                self.known_cron_by_rule_id[rule_id] = str(job.trigger)
 
     def sync(self, rules: Iterable[AlertRule]) -> None:
         desired = {rule.id: rule for rule in valid_scheduled_rules(rules)}
@@ -60,17 +77,19 @@ class RuleScheduleSynchronizer:
                 self.known_cron_by_rule_id.pop(rule_id, None)
 
         for rule_id, rule in desired.items():
-            unchanged = self.known_cron_by_rule_id.get(rule_id) == rule.cron_expression
-            if unchanged and self.scheduler.get_job(_job_id(rule_id)) is not None:
-                continue
             try:
-                if self.scheduler.get_job(_job_id(rule_id)) is not None:
+                job = self.scheduler.get_job(_job_id(rule_id))
+                cron_signature = _cron_signature(rule.cron_expression)
+                unchanged = self.known_cron_by_rule_id.get(rule_id) == cron_signature
+                if unchanged and job is not None:
+                    continue
+                if job is not None:
                     self.scheduler.remove_job(_job_id(rule_id))
                 _add_rule_job(self.scheduler, rule, self.execute_rule)
             except Exception:
                 self.logger.exception("同步规则调度任务失败: rule_id=%s", rule_id)
             else:
-                self.known_cron_by_rule_id[rule_id] = rule.cron_expression
+                self.known_cron_by_rule_id[rule_id] = cron_signature
 
 
 def build_scheduler(
