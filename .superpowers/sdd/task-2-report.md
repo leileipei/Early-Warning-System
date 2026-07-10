@@ -50,3 +50,73 @@
   Starlette's TestClient/httpx combination; this task does not alter those paths.
 - The worktree lacks its own virtual environment, so test evidence used the repository root's
   `.venv`.
+
+## Review Fixes
+
+Commit: `55c61d2 fix: reconcile existing scheduler jobs`
+
+- Seeded synchronization state from existing managed `rule-{id}` scheduler jobs using their
+  normalized Cron trigger signatures. This prevents unchanged jobs from being rescheduled and
+  makes pre-existing disabled, invalid, or deleted rule jobs eligible for removal.
+- Moved `get_job()` and the unchanged-job check into the per-rule exception boundary. A lookup
+  failure is now logged without blocking other rules, and state remains unchanged for retry.
+- Added regression coverage for adopting unchanged pre-existing jobs, removing pre-existing stale
+  jobs, and isolating/retrying a per-rule `get_job()` failure.
+
+### Review RED Evidence
+
+Command:
+
+```text
+/Users/leo.cui/Documents/Early Warning System/.venv/bin/python -m pytest \
+  tests/test_scheduler.py::test_rule_synchronizer_adopts_existing_unchanged_job_without_rescheduling \
+  tests/test_scheduler.py::test_rule_synchronizer_removes_preexisting_disabled_or_deleted_rules \
+  tests/test_scheduler.py::test_rule_synchronizer_isolates_get_job_failure_and_retries_rule -q
+```
+
+Exact summary:
+
+```text
+FFF                                                                      [100%]
+FAILED tests/test_scheduler.py::test_rule_synchronizer_adopts_existing_unchanged_job_without_rescheduling
+FAILED tests/test_scheduler.py::test_rule_synchronizer_removes_preexisting_disabled_or_deleted_rules
+FAILED tests/test_scheduler.py::test_rule_synchronizer_isolates_get_job_failure_and_retries_rule
+3 failed, 16 warnings in 0.06s
+```
+
+The failures were the expected `add_job.call_count == 1`, stale managed jobs still present, and an
+uncaught `RuntimeError("scheduler unavailable")` from `get_job()`.
+
+### Review GREEN Evidence
+
+Regression tests:
+
+```text
+...                                                                      [100%]
+3 passed, 20 warnings in 0.04s
+```
+
+Covering scheduler suite:
+
+```text
+..............                                                           [100%]
+14 passed, 62 warnings in 0.07s
+```
+
+Final full suite:
+
+```text
+........................................................................ [ 32%]
+........................................................................ [ 65%]
+........................................................................ [ 98%]
+....                                                                     [100%]
+220 passed, 463 warnings in 4.43s
+```
+
+Lint and diff checks:
+
+```text
+All checks passed!
+```
+
+`git diff --check` also exited successfully with no output.
