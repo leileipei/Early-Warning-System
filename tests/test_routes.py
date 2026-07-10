@@ -206,6 +206,46 @@ def test_settings_reject_invalid_secret_key():
     assert "secret_key" in error_fields
 
 
+def test_scheduler_sync_interval_defaults_to_ten_seconds():
+    from app.settings import Settings
+
+    settings = Settings(
+        session_secret="valid-session-secret",
+        secret_key=VALID_FERNET_KEY,
+    )
+
+    assert settings.scheduler_sync_interval_seconds == 10.0
+
+
+def test_scheduler_sync_interval_reads_environment(monkeypatch):
+    from app.settings import Settings
+
+    monkeypatch.setenv("SCHEDULER_SYNC_INTERVAL_SECONDS", "2.5")
+
+    settings = Settings(
+        session_secret="valid-session-secret",
+        secret_key=VALID_FERNET_KEY,
+    )
+
+    assert settings.scheduler_sync_interval_seconds == 2.5
+
+
+@pytest.mark.parametrize("value", ["0", "-1"])
+def test_scheduler_sync_interval_rejects_non_positive_values(value, monkeypatch):
+    from pydantic import ValidationError
+    from app.settings import Settings
+
+    monkeypatch.setenv("SCHEDULER_SYNC_INTERVAL_SECONDS", value)
+
+    with pytest.raises(ValidationError) as exc_info:
+        Settings(
+            session_secret="valid-session-secret",
+            secret_key=VALID_FERNET_KEY,
+        )
+
+    assert any(error["loc"] == ("scheduler_sync_interval_seconds",) for error in exc_info.value.errors())
+
+
 def test_settings_reads_dotenv_file(tmp_path, monkeypatch):
     monkeypatch.delenv("APP_NAME", raising=False)
     monkeypatch.delenv("SESSION_SECRET", raising=False)

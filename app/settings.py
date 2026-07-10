@@ -1,7 +1,7 @@
 from functools import lru_cache
 
 from cryptography.fernet import Fernet
-from pydantic import ValidationInfo, field_validator
+from pydantic import Field, ValidationInfo, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -10,6 +10,7 @@ class Settings(BaseSettings):
 
     app_name: str = "SQL 预警系统"
     database_url: str = "sqlite:///./early_warning.sqlite3"
+    scheduler_sync_interval_seconds: float = Field(default=10.0, gt=0)
     session_secret: str
     secret_key: str
 
