@@ -48,14 +48,17 @@ def run_sync_loop(
     sync_once=sync_rules_once,
     sleep_fn=time.sleep,
 ) -> None:
+    scheduler_started = False
     try:
         sync_once(synchronizer)
         scheduler.start()
+        scheduler_started = True
         while True:
             sleep_fn(interval_seconds)
             sync_once(synchronizer)
     except KeyboardInterrupt:
-        scheduler.shutdown()
+        if scheduler_started:
+            scheduler.shutdown()
 
 
 def main() -> None:

@@ -307,3 +307,22 @@ def test_worker_run_loop_syncs_immediately_then_uses_configured_interval(monkeyp
     assert sleeps == [2.5]
     scheduler.start.assert_called_once_with()
     scheduler.shutdown.assert_called_once_with()
+
+
+def test_worker_run_loop_does_not_shutdown_when_initial_sync_is_interrupted():
+    worker = importlib.import_module("app.worker")
+    scheduler = Mock()
+    synchronizer = Mock()
+
+    def interrupted_sync(target):
+        raise KeyboardInterrupt
+
+    worker.run_sync_loop(
+        scheduler,
+        synchronizer,
+        interval_seconds=2.5,
+        sync_once=interrupted_sync,
+    )
+
+    scheduler.start.assert_not_called()
+    scheduler.shutdown.assert_not_called()
