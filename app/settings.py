@@ -13,6 +13,10 @@ class Settings(BaseSettings):
     scheduler_sync_interval_seconds: float = Field(default=10.0, gt=0, allow_inf_nan=False)
     session_secret: str
     secret_key: str
+    session_cookie_secure: bool = False
+    login_max_failures: int = Field(default=5, gt=0)
+    login_failure_window_seconds: int = Field(default=900, gt=0)
+    login_lockout_seconds: int = Field(default=900, gt=0)
 
     @field_validator("session_secret", "secret_key")
     @classmethod

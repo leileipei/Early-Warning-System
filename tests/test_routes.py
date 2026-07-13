@@ -217,6 +217,65 @@ def test_scheduler_sync_interval_defaults_to_ten_seconds():
     assert settings.scheduler_sync_interval_seconds == 10.0
 
 
+def test_web_security_settings_have_safe_compatible_defaults():
+    from app.settings import Settings
+
+    settings = Settings(session_secret="valid-session-secret", secret_key=VALID_FERNET_KEY)
+
+    assert settings.session_cookie_secure is False
+    assert settings.login_max_failures == 5
+    assert settings.login_failure_window_seconds == 900
+    assert settings.login_lockout_seconds == 900
+
+
+@pytest.mark.parametrize(
+    "field_name",
+    ["login_max_failures", "login_failure_window_seconds", "login_lockout_seconds"],
+)
+@pytest.mark.parametrize("invalid_value", [0, -1])
+def test_web_security_integer_settings_reject_non_positive_values(field_name, invalid_value):
+    from app.settings import Settings
+
+    values = {
+        "session_secret": "valid-session-secret",
+        "secret_key": VALID_FERNET_KEY,
+        field_name: invalid_value,
+    }
+
+    with pytest.raises(ValidationError) as exc_info:
+        Settings(**values)
+
+    assert any(error["loc"] == (field_name,) for error in exc_info.value.errors())
+
+
+@pytest.mark.parametrize(
+    ("secure_value", "expects_secure"),
+    [("false", False), ("true", True)],
+)
+def test_session_cookie_security_flags_follow_configuration(monkeypatch, secure_value, expects_secure):
+    from fastapi import Request
+
+    _set_required_settings(monkeypatch)
+    monkeypatch.setenv("SESSION_COOKIE_SECURE", secure_value)
+    create_app, get_settings = _load_create_app()
+    app = create_app()
+
+    @app.get("/session-cookie-test")
+    def session_cookie_test(request: Request):
+        request.session["probe"] = "value"
+        return {"ok": True}
+
+    try:
+        response = TestClient(app).get("/session-cookie-test")
+        cookie = response.headers["set-cookie"].lower()
+
+        assert "httponly" in cookie
+        assert "samesite=lax" in cookie
+        assert ("secure" in cookie) is expects_secure
+    finally:
+        get_settings.cache_clear()
+
+
 def test_scheduler_sync_interval_reads_environment(monkeypatch):
     from app.settings import Settings
 
