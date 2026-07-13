@@ -63,6 +63,10 @@ DATABASE_URL=sqlite:///./early_warning.sqlite3
 SESSION_SECRET=REPLACE_ME_WITH_RANDOM_SESSION_SECRET
 SECRET_KEY=REPLACE_ME_WITH_32_BYTE_URL_SAFE_FERNET_KEY
 SCHEDULER_SYNC_INTERVAL_SECONDS=10
+SESSION_COOKIE_SECURE=false
+LOGIN_MAX_FAILURES=5
+LOGIN_FAILURE_WINDOW_SECONDS=900
+LOGIN_LOCKOUT_SECONDS=900
 ```
 
 ### SCHEDULER_SYNC_INTERVAL_SECONDS
@@ -94,6 +98,20 @@ python3 -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().
 - 不要使用 `.env.example` 中的 `REPLACE_ME` 占位值。
 - `SECRET_KEY` 一旦用于加密已有密码，不要随意更换；更换后旧密码将无法解密。
 - `.env` 不应提交到 Git。
+
+### Web 安全配置
+
+当前直接通过 HTTP 访问时使用 `SESSION_COOKIE_SECURE=false`，否则浏览器不会在 HTTP 请求中发送登录 Cookie。完成 HTTPS 反向代理后必须改为 `SESSION_COOKIE_SECURE=true`。Session Cookie 始终使用 `HttpOnly` 和 `SameSite=Lax`。
+
+登录限流默认按“客户端 IP + 去除首尾空白并忽略大小写的用户名”计数：15 分钟内失败 5 次后锁定 15 分钟。状态仅保存在单个 Web 进程内，重启 Web 会清空；不要配置多个 Web Worker，否则各进程不会共享计数。
+
+应用只使用 Uvicorn 校验后的 `request.client.host`，不会直接信任 `X-Forwarded-For`。反向代理与 Uvicorn 在同一服务器时，按实际代理地址启动，例如：
+
+```bash
+uvicorn app.main:create_app --factory --host 127.0.0.1 --port 8000 --proxy-headers --forwarded-allow-ips=127.0.0.1
+```
+
+`--forwarded-allow-ips` 必须只列出真实反向代理地址，不要设置为 `*`。
 
 ## 6. 初始化数据库
 

@@ -60,3 +60,9 @@ ruff check .
 日常巡检、备份恢复、升级发布和故障处理见：
 
 [docs/operations.md](docs/operations.md)
+
+### Web 安全
+
+当前使用 HTTP 时保持 `SESSION_COOKIE_SECURE=false`；完成 HTTPS 反向代理后必须改为 `true`。后台所有修改类表单使用 Session CSRF Token。登录默认在 15 分钟内失败 5 次后锁定 15 分钟。
+
+相关环境变量：`SESSION_COOKIE_SECURE`、`LOGIN_MAX_FAILURES`、`LOGIN_FAILURE_WINDOW_SECONDS`、`LOGIN_LOCKOUT_SECONDS`。
