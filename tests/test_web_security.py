@@ -82,6 +82,16 @@ def test_csrf_rejects_missing_or_wrong_token(csrf_client, data):
     assert csrf_client.app.state.submit_calls == 0
 
 
+def test_csrf_rejects_non_ascii_token_without_running_target(csrf_client):
+    csrf_client.get("/token")
+
+    response = csrf_client.post("/submit", data={"_csrf_token": "错误令牌"})
+
+    assert response.status_code == 403
+    assert response.json() == {"detail": "请求安全校验失败"}
+    assert csrf_client.app.state.submit_calls == 0
+
+
 def test_csrf_rejects_token_from_another_session(csrf_client):
     other = TestClient(csrf_client.app)
     foreign_token = other.get("/token").json()["token"]
@@ -186,6 +196,85 @@ def test_limiter_clear_removes_failures(limiter_and_clock):
     limiter.clear("10.0.0.1", "admin")
 
     assert limiter.record_failure("10.0.0.1", "admin") == 0
+
+
+def test_limiter_uses_bounded_digest_for_normalized_username(limiter_and_clock):
+    limiter, _ = limiter_and_clock
+    long_suffix = "x" * 100_000
+
+    first_key = limiter._key("10.0.0.1", f"  Straße{long_suffix}  ")
+    equivalent_key = limiter._key("10.0.0.1", f"STRASSE{long_suffix.upper()}")
+
+    assert first_key == equivalent_key
+    assert isinstance(first_key[1], bytes)
+    assert len(first_key[1]) == 32
+
+
+def test_limiter_capacity_fails_closed_without_growing_state():
+    clock = FakeClock()
+    limiter = LoginRateLimiter(
+        max_failures=5,
+        failure_window_seconds=900,
+        lockout_seconds=900,
+        clock=clock,
+        max_states=2,
+        cleanup_interval_seconds=30,
+        cleanup_batch_size=1,
+    )
+    assert limiter.record_failure("10.0.0.1", "first") == 0
+    assert limiter.record_failure("10.0.0.1", "second") == 0
+
+    with limiter.attempt("10.0.0.1", "third") as retry_after:
+        assert retry_after == 30
+
+    assert len(limiter._states) == 2
+
+
+def test_limiter_capacity_recovers_after_state_expiry():
+    clock = FakeClock()
+    limiter = LoginRateLimiter(
+        max_failures=5,
+        failure_window_seconds=60,
+        lockout_seconds=900,
+        clock=clock,
+        max_states=1,
+        cleanup_interval_seconds=10,
+        cleanup_batch_size=1,
+    )
+    assert limiter.record_failure("10.0.0.1", "expired") == 0
+    clock.advance(61)
+
+    with limiter.attempt("10.0.0.1", "replacement") as retry_after:
+        assert retry_after == 0
+        assert len(limiter._states) == 1
+
+    assert len(limiter._states) == 0
+
+
+def test_limiter_global_cleanup_is_interval_based_and_batched():
+    clock = FakeClock()
+    limiter = LoginRateLimiter(
+        max_failures=5,
+        failure_window_seconds=10,
+        lockout_seconds=900,
+        clock=clock,
+        max_states=10,
+        cleanup_interval_seconds=5,
+        cleanup_batch_size=1,
+    )
+    for username in ("first", "second", "third"):
+        assert limiter.record_failure("10.0.0.1", username) == 0
+    clock.advance(11)
+
+    assert limiter.retry_after("10.0.0.1", "other") == 0
+    assert len(limiter._states) == 2
+
+    assert limiter.retry_after("10.0.0.1", "other") == 0
+    assert len(limiter._states) == 2
+
+    clock.advance(5)
+    assert limiter.retry_after("10.0.0.1", "other") == 0
+    assert len(limiter._states) == 1
 
 
 def test_client_identifier_uses_request_client_host():

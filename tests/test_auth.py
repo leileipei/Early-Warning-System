@@ -1,5 +1,8 @@
 import importlib
 import re
+import time
+from concurrent.futures import ThreadPoolExecutor
+from threading import Barrier, Lock
 
 import pytest
 from cryptography.fernet import Fernet
@@ -254,6 +257,46 @@ def test_login_locks_on_fifth_failure(auth_app, auth_engine):
     assert responses[-1].json() == {"detail": "登录尝试过多，请稍后重试"}
 
 
+def test_concurrent_logins_for_one_key_stop_verifying_after_lockout(
+    auth_app,
+    auth_engine,
+    monkeypatch,
+):
+    _create_admin_user(auth_engine)
+    clients = [TestClient(auth_app) for _ in range(10)]
+    tokens = [_csrf_token(client) for client in clients]
+    start = Barrier(len(clients))
+    call_lock = Lock()
+    verification_calls = 0
+
+    def reject_password(*_args):
+        nonlocal verification_calls
+        with call_lock:
+            verification_calls += 1
+        time.sleep(0.05)
+        return False
+
+    monkeypatch.setattr("app.auth.verify_password", reject_password)
+
+    def attempt_login(item):
+        client, token = item
+        start.wait()
+        return client.post(
+            "/login",
+            data={"username": "admin", "password": "wrong", "_csrf_token": token},
+        ).status_code
+
+    try:
+        with ThreadPoolExecutor(max_workers=len(clients)) as executor:
+            statuses = list(executor.map(attempt_login, zip(clients, tokens, strict=True)))
+    finally:
+        for client in clients:
+            client.close()
+
+    assert verification_calls == 5
+    assert sorted(statuses) == [400] * 4 + [429] * 6
+
+
 def test_locked_login_skips_password_verification(auth_app, auth_engine, monkeypatch):
     _create_admin_user(auth_engine)
     client = TestClient(auth_app)
@@ -269,6 +312,31 @@ def test_locked_login_skips_password_verification(auth_app, auth_engine, monkeyp
     )
 
     assert response.status_code == 429
+
+
+def test_limiter_capacity_overflow_skips_password_verification(auth_app, monkeypatch):
+    from app.web_security import LoginRateLimiter
+
+    client_host = "10.0.0.8"
+    auth_app.state.login_rate_limiter = LoginRateLimiter(
+        max_failures=5,
+        failure_window_seconds=900,
+        lockout_seconds=900,
+        max_states=1,
+        cleanup_interval_seconds=30,
+    )
+    auth_app.state.login_rate_limiter.record_failure(client_host, "occupied")
+    monkeypatch.setattr("app.auth.verify_password", lambda *_args: pytest.fail("must not verify"))
+    client = TestClient(auth_app, client=(client_host, 50000))
+
+    response = _csrf_post(
+        client,
+        "/login",
+        data={"username": "new-key", "password": "password"},
+    )
+
+    assert response.status_code == 429
+    assert response.headers["retry-after"] == "30"
 
 
 def test_login_lock_expires(auth_app, auth_engine):
@@ -306,6 +374,31 @@ def test_unknown_user_and_wrong_password_share_limit_behavior(auth_app, auth_eng
 
     assert [response.status_code for response in unknown] == [400, 400, 400, 400, 429]
     assert [response.status_code for response in wrong] == [400, 400, 400, 400, 429]
+
+
+def test_unknown_user_verifies_password_against_fixed_dummy_hash(
+    auth_app,
+    monkeypatch,
+):
+    calls = []
+
+    def reject_password(password, password_hash):
+        calls.append((password, password_hash))
+        return False
+
+    monkeypatch.setattr("app.auth.verify_password", reject_password)
+    client = TestClient(auth_app)
+
+    responses = [
+        _csrf_post(client, "/login", data={"username": "missing", "password": "submitted"})
+        for _ in range(5)
+    ]
+
+    assert len(calls) == 5
+    auth_module = importlib.import_module("app.auth")
+    assert calls == [("submitted", auth_module.DUMMY_PASSWORD_HASH)] * 5
+    assert auth_module.DUMMY_PASSWORD_HASH.startswith("$2b$12$")
+    assert [response.status_code for response in responses] == [400, 400, 400, 400, 429]
 
 
 def test_successful_login_clears_previous_failures(auth_app, auth_engine):

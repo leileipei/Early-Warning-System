@@ -458,6 +458,27 @@ def test_create_rule_requires_admin_session(monkeypatch):
         get_settings.cache_clear()
 
 
+@pytest.mark.parametrize("csrf_token", [None, "wrong-token"])
+def test_create_rule_enforces_real_page_router_csrf(monkeypatch, session, csrf_token):
+    data_source = _create_data_source(session)
+    client, get_settings, app = _client_with_admin(monkeypatch, session)
+    try:
+        app.dependency_overrides.pop(require_csrf)
+        _csrf_token(client)
+        form_data = _valid_rule_form(data_source.id)
+        if csrf_token is not None:
+            form_data["_csrf_token"] = csrf_token
+
+        response = client.post("/rules", data=form_data, follow_redirects=False)
+
+        assert response.status_code == 403
+        assert response.json() == {"detail": "请求安全校验失败"}
+        assert session.exec(select(AlertRule)).all() == []
+    finally:
+        app.dependency_overrides.clear()
+        get_settings.cache_clear()
+
+
 def test_create_rule_persists_alert_rule(monkeypatch, session):
     data_source = _create_data_source(session)
     client, get_settings, app = _client_with_admin(monkeypatch, session)

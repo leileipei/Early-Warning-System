@@ -14,6 +14,7 @@ from app.web_security import (
 
 router = APIRouter(dependencies=[Depends(require_csrf)])
 LOGIN_LIMIT_DETAIL = "登录尝试过多，请稍后重试"
+DUMMY_PASSWORD_HASH = "$2b$12$0kBPCpi0b/V47sHVriEA7.Du9xSBpCUp8Dmb5xq.fDZVF3Fc0ZyKW"
 
 
 def _raise_login_limited(retry_after: int) -> None:
@@ -50,22 +51,24 @@ def login(
 ):
     limiter: LoginRateLimiter = request.app.state.login_rate_limiter
     client_id = client_identifier(request)
-    retry_after = limiter.retry_after(client_id, username)
-    if retry_after:
-        _raise_login_limited(retry_after)
-
-    user = session.exec(select(AdminUser).where(AdminUser.username == username)).first()
-    if not user or not verify_password(password, user.password_hash):
-        retry_after = limiter.record_failure(client_id, username)
+    with limiter.attempt(client_id, username) as retry_after:
         if retry_after:
             _raise_login_limited(retry_after)
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="用户名或密码错误")
 
-    limiter.clear(client_id, username)
-    request.session.clear()
-    rotate_csrf_token(request)
-    request.session["admin_user_id"] = user.id
-    return RedirectResponse("/", status_code=status.HTTP_303_SEE_OTHER)
+        user = session.exec(select(AdminUser).where(AdminUser.username == username)).first()
+        password_hash = user.password_hash if user is not None else DUMMY_PASSWORD_HASH
+        password_matches = verify_password(password, password_hash)
+        if user is None or not password_matches:
+            retry_after = limiter.record_failure(client_id, username)
+            if retry_after:
+                _raise_login_limited(retry_after)
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="用户名或密码错误")
+
+        limiter.clear(client_id, username)
+        request.session.clear()
+        rotate_csrf_token(request)
+        request.session["admin_user_id"] = user.id
+        return RedirectResponse("/", status_code=status.HTTP_303_SEE_OTHER)
 
 
 @router.post("/logout")
