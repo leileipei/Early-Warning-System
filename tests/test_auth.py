@@ -1,4 +1,5 @@
 import importlib
+import re
 
 import pytest
 from cryptography.fernet import Fernet
@@ -12,6 +13,8 @@ from app.crypto import SecretCipher
 from app.db import get_session
 from app.models import AdminUser
 from app.security import hash_password, verify_password
+
+CSRF_PATTERN = re.compile(r'name="_csrf_token" value="([^"]+)"')
 
 
 def _set_required_settings(monkeypatch):
@@ -79,6 +82,19 @@ def _delete_admin_user(engine, user_id: int) -> None:
         session.commit()
 
 
+def _csrf_token(client: TestClient) -> str:
+    response = client.get("/login")
+    match = CSRF_PATTERN.search(response.text)
+    assert match is not None
+    return match.group(1)
+
+
+def _csrf_post(client: TestClient, path: str, *, data=None, **kwargs):
+    payload = dict(data or {})
+    payload["_csrf_token"] = _csrf_token(client)
+    return client.post(path, data=payload, **kwargs)
+
+
 def test_password_hash_round_trip():
     password_hash = hash_password("CorrectHorseBatteryStaple")
 
@@ -100,7 +116,8 @@ def test_login_success_sets_admin_session(auth_app, auth_engine):
     _create_admin_user(auth_engine)
     client = TestClient(auth_app)
 
-    response = client.post(
+    response = _csrf_post(
+        client,
         "/login",
         data={"username": "admin", "password": "correct-password"},
         follow_redirects=False,
@@ -117,7 +134,8 @@ def test_login_with_wrong_password_returns_400(auth_app, auth_engine):
     _create_admin_user(auth_engine)
     client = TestClient(auth_app)
 
-    response = client.post(
+    response = _csrf_post(
+        client,
         "/login",
         data={"username": "admin", "password": "wrong-password"},
         follow_redirects=False,
@@ -130,14 +148,15 @@ def test_login_with_wrong_password_returns_400(auth_app, auth_engine):
 def test_logout_clears_admin_session(auth_app, auth_engine):
     _create_admin_user(auth_engine)
     client = TestClient(auth_app)
-    login_response = client.post(
+    login_response = _csrf_post(
+        client,
         "/login",
         data={"username": "admin", "password": "correct-password"},
         follow_redirects=False,
     )
     assert login_response.status_code == 303
 
-    logout_response = client.post("/logout", follow_redirects=False)
+    logout_response = _csrf_post(client, "/logout", follow_redirects=False)
 
     assert logout_response.status_code == 303
     assert logout_response.headers["location"] == "/login"
@@ -148,7 +167,8 @@ def test_logout_clears_admin_session(auth_app, auth_engine):
 def test_require_admin_rejects_session_for_missing_user(auth_app, auth_engine):
     user_id = _create_admin_user(auth_engine)
     client = TestClient(auth_app)
-    login_response = client.post(
+    login_response = _csrf_post(
+        client,
         "/login",
         data={"username": "admin", "password": "correct-password"},
         follow_redirects=False,
@@ -159,3 +179,31 @@ def test_require_admin_rejects_session_for_missing_user(auth_app, auth_engine):
     response = client.get("/protected-test-route")
 
     assert response.status_code == 401
+
+
+def test_login_rejects_missing_csrf_token(auth_app):
+    client = TestClient(auth_app)
+
+    response = client.post("/login", data={"username": "admin", "password": "password"})
+
+    assert response.status_code == 403
+    assert response.json() == {"detail": "请求安全校验失败"}
+
+
+def test_login_rotates_csrf_token(auth_app, auth_engine):
+    _create_admin_user(auth_engine)
+    client = TestClient(auth_app)
+    old_token = _csrf_token(client)
+
+    response = client.post(
+        "/login",
+        data={
+            "username": "admin",
+            "password": "correct-password",
+            "_csrf_token": old_token,
+        },
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 303
+    assert client.post("/logout", data={"_csrf_token": old_token}).status_code == 403

@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "_csrf.html" import csrf_input %}
 
 {% block content %}
 <section class="page-header">
@@ -14,6 +15,7 @@
   <p class="form-error">{{ error }}</p>
   {% endif %}
   <form class="stacked-form" method="post" action="{{ action }}">
+    {{ csrf_input(csrf_token) }}
     <label>
       <span>名称</span>
       <input name="name" value="{{ form.get('name', '') }}" required>

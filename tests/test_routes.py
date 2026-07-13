@@ -1,5 +1,7 @@
 import importlib
 import json
+import re
+from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
@@ -21,8 +23,10 @@ from app.models import (
 )
 from app.mailer import MailSendResult
 from app.sql_client import QueryResult
+from app.web_security import require_csrf
 
 VALID_FERNET_KEY = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+CSRF_PATTERN = re.compile(r'name="_csrf_token" value="([^"]+)"')
 
 
 def _set_required_settings(monkeypatch):
@@ -53,7 +57,21 @@ def _client_with_admin(monkeypatch, session):
 
     app.dependency_overrides[routes.require_admin] = _admin_user
     app.dependency_overrides[routes.get_session] = override_session
+    app.dependency_overrides[require_csrf] = lambda: None
     return TestClient(app), get_settings, app
+
+
+def _csrf_token(client: TestClient) -> str:
+    response = client.get("/login")
+    match = CSRF_PATTERN.search(response.text)
+    assert match is not None
+    return match.group(1)
+
+
+def _post_as_unauthenticated(client: TestClient, path: str, *, data=None, files=None, **kwargs):
+    payload = dict(data or {})
+    payload["_csrf_token"] = _csrf_token(client)
+    return client.post(path, data=payload, files=files, **kwargs)
 
 
 def _create_data_source(session):
@@ -348,6 +366,41 @@ def test_login_page_renders(monkeypatch):
         get_settings.cache_clear()
 
 
+def test_login_page_renders_csrf_hidden_field(monkeypatch):
+    _set_required_settings(monkeypatch)
+    create_app, get_settings = _load_create_app()
+    try:
+        response = TestClient(create_app()).get("/login")
+
+        assert response.status_code == 200
+        assert CSRF_PATTERN.search(response.text)
+    finally:
+        get_settings.cache_clear()
+
+
+@pytest.mark.parametrize(
+    ("path", "minimum_form_count"),
+    [("/rules", 2), ("/rules/new", 2), ("/settings", 3)],
+)
+def test_admin_pages_render_csrf_for_every_post_form(monkeypatch, session, path, minimum_form_count):
+    client, get_settings, app = _client_with_admin(monkeypatch, session)
+    try:
+        response = client.get(path)
+
+        assert response.status_code == 200
+        assert response.text.count('name="_csrf_token"') >= minimum_form_count
+        assert response.text.count('name="_csrf_token"') == response.text.count('method="post"')
+    finally:
+        app.dependency_overrides.clear()
+        get_settings.cache_clear()
+
+
+def test_sql_ajax_requests_include_csrf_token():
+    script = Path("app/static/app.js").read_text(encoding="utf-8")
+
+    assert script.count('payload.append("_csrf_token"') == 2
+
+
 def test_dashboard_redirects_browser_to_login_when_unauthenticated(monkeypatch):
     _set_required_settings(monkeypatch)
     create_app, get_settings = _load_create_app()
@@ -398,7 +451,7 @@ def test_create_rule_requires_admin_session(monkeypatch):
     try:
         client = TestClient(create_app())
 
-        response = client.post("/rules", data={"name": "x"})
+        response = _post_as_unauthenticated(client, "/rules", data={"name": "x"})
 
         assert response.status_code == 401
     finally:
@@ -843,7 +896,8 @@ def test_import_rules_json_requires_login(monkeypatch):
     try:
         client = TestClient(create_app())
 
-        response = client.post(
+        response = _post_as_unauthenticated(
+            client,
             "/rules/import",
             files={"file": ("rules.json", json.dumps({"version": 1, "rules": []}), "application/json")},
         )
@@ -1023,7 +1077,7 @@ def test_validate_rule_sql_requires_admin_session(monkeypatch):
     try:
         client = TestClient(create_app())
 
-        response = client.post("/rules/validate-sql", data={"sql_text": "select 1"})
+        response = _post_as_unauthenticated(client, "/rules/validate-sql", data={"sql_text": "select 1"})
 
         assert response.status_code == 401
     finally:
@@ -1163,7 +1217,7 @@ def test_preview_rule_sql_requires_admin_session(monkeypatch):
     try:
         client = TestClient(create_app())
 
-        response = client.post("/rules/preview-sql", data={"sql_text": "select 1"})
+        response = _post_as_unauthenticated(client, "/rules/preview-sql", data={"sql_text": "select 1"})
 
         assert response.status_code == 401
     finally:
@@ -1635,7 +1689,7 @@ def test_test_sql_server_settings_requires_admin_session(monkeypatch):
     try:
         client = TestClient(create_app())
 
-        response = client.post("/settings/sql-server/1/test")
+        response = _post_as_unauthenticated(client, "/settings/sql-server/1/test")
 
         assert response.status_code == 401
     finally:
@@ -1686,7 +1740,7 @@ def test_test_smtp_settings_requires_admin_session(monkeypatch):
     try:
         client = TestClient(create_app())
 
-        response = client.post("/settings/smtp/1/test")
+        response = _post_as_unauthenticated(client, "/settings/smtp/1/test")
 
         assert response.status_code == 401
     finally:
@@ -1791,7 +1845,7 @@ def test_create_sql_server_settings_requires_admin_session(monkeypatch):
     try:
         client = TestClient(create_app())
 
-        response = client.post("/settings/sql-server", data={"name": "生产库"})
+        response = _post_as_unauthenticated(client, "/settings/sql-server", data={"name": "生产库"})
 
         assert response.status_code == 401
     finally:
@@ -2164,7 +2218,7 @@ def test_run_rule_requires_login(monkeypatch):
     try:
         client = TestClient(create_app())
 
-        response = client.post("/rules/1/run")
+        response = _post_as_unauthenticated(client, "/rules/1/run")
 
         assert response.status_code == 401
     finally:

@@ -31,8 +31,9 @@ from app.models import (
 from app.paths import TEMPLATES_DIR
 from app.settings import get_settings
 from app.sql_validator import SqlValidationError, validate_select_only_sql
+from app.web_security import ensure_csrf_token, require_csrf
 
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(require_csrf)])
 templates = Jinja2Templates(directory=TEMPLATES_DIR)
 
 
@@ -46,7 +47,7 @@ def _template_response(
     return templates.TemplateResponse(
         request,
         template_name,
-        {"request": request, **context},
+        {"request": request, "csrf_token": ensure_csrf_token(request), **context},
         status_code=status_code,
     )
 

@@ -1,3 +1,4 @@
+{% from "_csrf.html" import csrf_input %}
 <!doctype html>
 <html lang="zh-CN">
   <head>
@@ -17,6 +18,7 @@
         <a href="/logs">日志</a>
       </nav>
       <form class="logout-form" method="post" action="/logout">
+        {{ csrf_input(csrf_token) }}
         <button class="button button-secondary" type="submit">退出</button>
       </form>
     </header>

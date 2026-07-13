@@ -5,8 +5,9 @@ from sqlmodel import Session, select
 from app.db import get_session
 from app.models import AdminUser
 from app.security import verify_password
+from app.web_security import require_csrf, rotate_csrf_token
 
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(require_csrf)])
 
 
 def require_admin(
@@ -38,6 +39,7 @@ def login(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="用户名或密码错误")
     request.session.clear()
     request.session["admin_user_id"] = user.id
+    rotate_csrf_token(request)
     return RedirectResponse("/", status_code=status.HTTP_303_SEE_OTHER)
 
 

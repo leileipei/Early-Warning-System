@@ -25,6 +25,8 @@ document.addEventListener("DOMContentLoaded", () => {
       const payload = new FormData();
       payload.append("sql_text", sqlInput.value);
       payload.append("data_source_id", dataSourceInput?.value || "");
+      const csrfInput = form?.querySelector('[name="_csrf_token"]');
+      payload.append("_csrf_token", csrfInput?.value || "");
 
       try {
         const response = await fetch(endpoint, {
@@ -67,6 +69,8 @@ document.addEventListener("DOMContentLoaded", () => {
       payload.append("sql_text", sqlInput.value);
       payload.append("data_source_id", dataSourceInput?.value || "");
       payload.append("query_timeout_seconds", timeoutInput?.value || "30");
+      const csrfInput = form?.querySelector('[name="_csrf_token"]');
+      payload.append("_csrf_token", csrfInput?.value || "");
 
       try {
         const response = await fetch(endpoint, {

@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "_csrf.html" import csrf_input %}
 
 {% block content %}
 <section class="page-header">
@@ -19,6 +20,7 @@
   <article class="panel">
     <h2>SQL Server</h2>
     <form class="stacked-form" method="post" action="/settings/sql-server">
+      {{ csrf_input(csrf_token) }}
       <label>
         <span>名称</span>
         <input name="name" required>
@@ -103,6 +105,7 @@
             <td>
               <div class="table-actions">
                 <form class="inline-form" method="post" action="/settings/sql-server/{{ data_source.id }}/test">
+                  {{ csrf_input(csrf_token) }}
                   <button class="button button-secondary" type="submit">测试连接</button>
                 </form>
                 <a class="button button-secondary" href="/settings/sql-server/{{ data_source.id }}/edit">编辑</a>
@@ -121,6 +124,7 @@
   <article class="panel">
     <h2>SMTP</h2>
     <form class="stacked-form" method="post" action="/settings/smtp">
+      {{ csrf_input(csrf_token) }}
       <label>
         <span>服务器</span>
         <input name="host" required>
@@ -182,6 +186,7 @@
             <td>
               <div class="table-actions">
                 <form class="inline-form" method="post" action="/settings/smtp/{{ smtp_config.id }}/test">
+                  {{ csrf_input(csrf_token) }}
                   <button class="button button-secondary" type="submit">测试发送</button>
                 </form>
               </div>
