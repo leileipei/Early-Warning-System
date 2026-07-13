@@ -5,9 +5,23 @@ from sqlmodel import Session, select
 from app.db import get_session
 from app.models import AdminUser
 from app.security import verify_password
-from app.web_security import require_csrf, rotate_csrf_token
+from app.web_security import (
+    LoginRateLimiter,
+    client_identifier,
+    require_csrf,
+    rotate_csrf_token,
+)
 
 router = APIRouter(dependencies=[Depends(require_csrf)])
+LOGIN_LIMIT_DETAIL = "登录尝试过多，请稍后重试"
+
+
+def _raise_login_limited(retry_after: int) -> None:
+    raise HTTPException(
+        status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+        detail=LOGIN_LIMIT_DETAIL,
+        headers={"Retry-After": str(retry_after)},
+    )
 
 
 def require_admin(
@@ -34,12 +48,23 @@ def login(
     password: str = Form(...),
     session: Session = Depends(get_session),
 ):
+    limiter: LoginRateLimiter = request.app.state.login_rate_limiter
+    client_id = client_identifier(request)
+    retry_after = limiter.retry_after(client_id, username)
+    if retry_after:
+        _raise_login_limited(retry_after)
+
     user = session.exec(select(AdminUser).where(AdminUser.username == username)).first()
     if not user or not verify_password(password, user.password_hash):
+        retry_after = limiter.record_failure(client_id, username)
+        if retry_after:
+            _raise_login_limited(retry_after)
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="用户名或密码错误")
+
+    limiter.clear(client_id, username)
     request.session.clear()
-    request.session["admin_user_id"] = user.id
     rotate_csrf_token(request)
+    request.session["admin_user_id"] = user.id
     return RedirectResponse("/", status_code=status.HTTP_303_SEE_OTHER)
 
 

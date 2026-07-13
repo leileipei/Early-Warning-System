@@ -95,6 +95,28 @@ def _csrf_post(client: TestClient, path: str, *, data=None, **kwargs):
     return client.post(path, data=payload, **kwargs)
 
 
+class FakeClock:
+    def __init__(self):
+        self.now = 1000.0
+
+    def __call__(self):
+        return self.now
+
+    def advance(self, seconds):
+        self.now += seconds
+
+
+def make_test_limiter(clock):
+    from app.web_security import LoginRateLimiter
+
+    return LoginRateLimiter(
+        max_failures=5,
+        failure_window_seconds=900,
+        lockout_seconds=900,
+        clock=clock,
+    )
+
+
 def test_password_hash_round_trip():
     password_hash = hash_password("CorrectHorseBatteryStaple")
 
@@ -207,3 +229,109 @@ def test_login_rotates_csrf_token(auth_app, auth_engine):
 
     assert response.status_code == 303
     assert client.post("/logout", data={"_csrf_token": old_token}).status_code == 403
+
+
+def test_login_locks_on_fifth_failure(auth_app, auth_engine):
+    from app.web_security import LoginRateLimiter
+
+    _create_admin_user(auth_engine)
+    clock = FakeClock()
+    auth_app.state.login_rate_limiter = LoginRateLimiter(
+        max_failures=5,
+        failure_window_seconds=900,
+        lockout_seconds=900,
+        clock=clock,
+    )
+    client = TestClient(auth_app)
+
+    responses = [
+        _csrf_post(client, "/login", data={"username": "admin", "password": "wrong"})
+        for _ in range(5)
+    ]
+
+    assert [response.status_code for response in responses] == [400, 400, 400, 400, 429]
+    assert responses[-1].headers["retry-after"] == "900"
+    assert responses[-1].json() == {"detail": "登录尝试过多，请稍后重试"}
+
+
+def test_locked_login_skips_password_verification(auth_app, auth_engine, monkeypatch):
+    _create_admin_user(auth_engine)
+    client = TestClient(auth_app)
+    for _ in range(5):
+        _csrf_post(client, "/login", data={"username": "admin", "password": "wrong"})
+
+    monkeypatch.setattr("app.auth.verify_password", lambda *args: pytest.fail("must not verify"))
+
+    response = _csrf_post(
+        client,
+        "/login",
+        data={"username": "admin", "password": "correct-password"},
+    )
+
+    assert response.status_code == 429
+
+
+def test_login_lock_expires(auth_app, auth_engine):
+    _create_admin_user(auth_engine)
+    clock = FakeClock()
+    auth_app.state.login_rate_limiter = make_test_limiter(clock)
+    client = TestClient(auth_app)
+    for _ in range(5):
+        _csrf_post(client, "/login", data={"username": "admin", "password": "wrong"})
+
+    clock.advance(901)
+    response = _csrf_post(
+        client,
+        "/login",
+        data={"username": "admin", "password": "correct-password"},
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 303
+
+
+def test_unknown_user_and_wrong_password_share_limit_behavior(auth_app, auth_engine):
+    _create_admin_user(auth_engine)
+    unknown_client = TestClient(auth_app, client=("10.0.0.1", 50000))
+    wrong_client = TestClient(auth_app, client=("10.0.0.2", 50000))
+
+    unknown = [
+        _csrf_post(unknown_client, "/login", data={"username": "missing", "password": "wrong"})
+        for _ in range(5)
+    ]
+    wrong = [
+        _csrf_post(wrong_client, "/login", data={"username": "admin", "password": "wrong"})
+        for _ in range(5)
+    ]
+
+    assert [response.status_code for response in unknown] == [400, 400, 400, 400, 429]
+    assert [response.status_code for response in wrong] == [400, 400, 400, 400, 429]
+
+
+def test_successful_login_clears_previous_failures(auth_app, auth_engine):
+    _create_admin_user(auth_engine)
+    client = TestClient(auth_app)
+    for _ in range(4):
+        response = _csrf_post(
+            client,
+            "/login",
+            data={"username": "admin", "password": "wrong"},
+        )
+        assert response.status_code == 400
+
+    login_response = _csrf_post(
+        client,
+        "/login",
+        data={"username": "admin", "password": "correct-password"},
+        follow_redirects=False,
+    )
+    assert login_response.status_code == 303
+
+    logout_response = _csrf_post(client, "/logout", follow_redirects=False)
+    assert logout_response.status_code == 303
+
+    responses = [
+        _csrf_post(client, "/login", data={"username": "admin", "password": "wrong"})
+        for _ in range(4)
+    ]
+    assert [response.status_code for response in responses] == [400, 400, 400, 400]

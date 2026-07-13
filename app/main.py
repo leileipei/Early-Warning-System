@@ -8,11 +8,17 @@ from app.auth import router as auth_router
 from app.paths import STATIC_DIR
 from app.routes import router as page_router
 from app.settings import get_settings
+from app.web_security import LoginRateLimiter
 
 
 def create_app() -> FastAPI:
     settings = get_settings()
     app = FastAPI(title=settings.app_name)
+    app.state.login_rate_limiter = LoginRateLimiter(
+        max_failures=settings.login_max_failures,
+        failure_window_seconds=settings.login_failure_window_seconds,
+        lockout_seconds=settings.login_lockout_seconds,
+    )
     app.add_middleware(
         SessionMiddleware,
         secret_key=settings.session_secret,
