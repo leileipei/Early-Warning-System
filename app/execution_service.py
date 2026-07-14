@@ -75,7 +75,7 @@ def execute_rule_by_id(
     sleep_fn=time.sleep,
 ) -> ExecutionLog:
     rule = session.get(AlertRule, rule_id)
-    if rule is None:
+    if rule is None or rule.archived_at is not None:
         raise RuleNotFoundError(f"rule {rule_id} not found")
 
     started_at = datetime.utcnow()

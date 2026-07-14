@@ -10,7 +10,7 @@ from app.models import AlertRule
 def valid_scheduled_rules(rules: Iterable[AlertRule]) -> list[AlertRule]:
     valid_rules = []
     for rule in rules:
-        if not rule.enabled or rule.id is None:
+        if rule.archived_at is not None or not rule.enabled or rule.id is None:
             continue
         try:
             CronTrigger.from_crontab(rule.cron_expression)

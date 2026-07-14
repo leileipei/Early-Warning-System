@@ -157,6 +157,7 @@ def test_init_db_adds_duplicate_suppression_columns_to_existing_sqlite_rule_tabl
 
     columns = {column["name"] for column in inspect(legacy_engine).get_columns("alertrule")}
     assert {
+        "archived_at",
         "suppress_duplicates",
         "suppression_key_field",
         "suppression_window_hours",

@@ -31,7 +31,7 @@ def sync_rules_once(synchronizer, session_factory=None, logger=None) -> bool:
     active_logger = logger or globals()["logger"]
     try:
         with factory() as session:
-            rules = session.exec(select(AlertRule)).all()
+            rules = session.exec(select(AlertRule).where(AlertRule.archived_at.is_(None))).all()
     except Exception:
         active_logger.exception("读取预警规则失败，保留当前调度任务")
         return False
