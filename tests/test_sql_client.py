@@ -30,7 +30,8 @@ def test_pyodbc_sql_server_client_builds_connection_string():
     )
 
     assert "DRIVER={ODBC Driver 18 for SQL Server};" in client.connection_string
-    assert "SERVER={db.example.internal},1433;" in client.connection_string
+    assert "SERVER={db.example.internal,1433};" in client.connection_string
+    assert "SERVER={db.example.internal},1433;" not in client.connection_string
     assert "DATABASE={warnings};" in client.connection_string
     assert "UID={warning_user};" in client.connection_string
     assert "PWD={secret};" in client.connection_string
@@ -60,7 +61,7 @@ def test_pyodbc_sql_server_client_supports_advanced_connection_options():
     assert "TrustServerCertificate=no;" in client.connection_string
     assert "ApplicationIntent=ReadOnly;" in client.connection_string
     assert "MultiSubnetFailover=Yes;" in client.connection_string
-    assert "SERVER={db.example.internal},1433;" not in client.connection_string
+    assert "SERVER={db.example.internal,1433};" not in client.connection_string
 
 
 def test_pyodbc_sql_server_client_escapes_braced_connection_string_values():
@@ -79,7 +80,6 @@ def test_pyodbc_sql_server_client_escapes_braced_connection_string_values():
 
 class FakePyodbcCursor(FakeCursor):
     def __init__(self):
-        self.timeout = None
         self.executed_sql = None
         self.max_rows = None
 
@@ -94,6 +94,7 @@ class FakePyodbcCursor(FakeCursor):
 class FakePyodbcConnection:
     def __init__(self, cursor):
         self._cursor = cursor
+        self.timeout = None
 
     def __enter__(self):
         return self
@@ -131,7 +132,7 @@ def test_query_executes_original_sql_limits_rows_with_fetchmany_and_sets_timeout
     result = client.query("select id, amount from orders", timeout_seconds=7, max_rows=25)
 
     assert fake_pyodbc.connection_string == client.connection_string
-    assert cursor.timeout == 7
+    assert fake_pyodbc.connection.timeout == 7
     assert cursor.executed_sql == "select id, amount from orders"
     assert cursor.max_rows == 25
     assert result == QueryResult(rows=[{"id": 1, "amount": 12000}, {"id": 2, "amount": 15000}])
@@ -189,7 +190,7 @@ def test_validate_syntax_asks_sql_server_to_parse_without_executing(monkeypatch)
     client.validate_syntax("select id from orders;  \n", timeout_seconds=9)
 
     assert fake_pyodbc.connection_string == client.connection_string
-    assert cursor.timeout == 9
+    assert fake_pyodbc.connection.timeout == 9
     assert cursor.executed_sql == "SET PARSEONLY ON;\nselect id from orders;\nSET PARSEONLY OFF;"
 
 
