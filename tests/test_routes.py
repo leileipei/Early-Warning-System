@@ -1725,6 +1725,132 @@ def test_delete_sql_server_settings_requires_admin_session(monkeypatch):
         get_settings.cache_clear()
 
 
+def test_settings_page_includes_smtp_edit_and_delete_actions(monkeypatch, session):
+    smtp_config = _create_smtp_config(session)
+    client, get_settings, app = _client_with_admin(monkeypatch, session)
+    try:
+        response = client.get("/settings")
+
+        assert response.status_code == 200
+        assert f"/settings/smtp/{smtp_config.id}/edit" in response.text
+        assert f"/settings/smtp/{smtp_config.id}/delete" in response.text
+        assert "确认删除该 SMTP 配置吗？" in response.text
+    finally:
+        app.dependency_overrides.clear()
+        get_settings.cache_clear()
+
+
+def test_edit_smtp_settings_page_prefills_existing_config(monkeypatch, session):
+    smtp_config = _create_smtp_config(session)
+    client, get_settings, app = _client_with_admin(monkeypatch, session)
+    try:
+        response = client.get(f"/settings/smtp/{smtp_config.id}/edit")
+
+        assert response.status_code == 200
+        assert "编辑 SMTP 配置" in response.text
+        assert smtp_config.host in response.text
+        assert smtp_config.username in response.text
+        assert smtp_config.encrypted_password not in response.text
+        assert f'action="/settings/smtp/{smtp_config.id}"' in response.text
+    finally:
+        app.dependency_overrides.clear()
+        get_settings.cache_clear()
+
+
+def test_update_smtp_settings_preserves_blank_password(monkeypatch, session):
+    smtp_config = _create_smtp_config(session)
+    original_encrypted_password = smtp_config.encrypted_password
+    client, get_settings, app = _client_with_admin(monkeypatch, session)
+    try:
+        response = client.post(
+            f"/settings/smtp/{smtp_config.id}",
+            data={
+                "host": "new-smtp.example.com",
+                "port": "465",
+                "username": "new-mailer",
+                "password": "",
+                "sender": "new-alerts@example.com",
+                "use_ssl": "on",
+                "timeout_seconds": "20",
+                "enabled": "",
+            },
+            follow_redirects=False,
+        )
+
+        assert response.status_code == 303
+        assert response.headers["location"] == "/settings"
+        session.refresh(smtp_config)
+        assert smtp_config.host == "new-smtp.example.com"
+        assert smtp_config.port == 465
+        assert smtp_config.username == "new-mailer"
+        assert smtp_config.encrypted_password == original_encrypted_password
+        assert smtp_config.sender == "new-alerts@example.com"
+        assert smtp_config.use_tls is False
+        assert smtp_config.use_ssl is True
+        assert smtp_config.timeout_seconds == 20
+        assert smtp_config.enabled is False
+    finally:
+        app.dependency_overrides.clear()
+        get_settings.cache_clear()
+
+
+def test_update_smtp_settings_replaces_password_when_provided(monkeypatch, session):
+    smtp_config = _create_smtp_config(session)
+    original_encrypted_password = smtp_config.encrypted_password
+    client, get_settings, app = _client_with_admin(monkeypatch, session)
+    try:
+        response = client.post(
+            f"/settings/smtp/{smtp_config.id}",
+            data={
+                "host": smtp_config.host,
+                "port": "587",
+                "username": smtp_config.username,
+                "password": "replacement-password",
+                "sender": smtp_config.sender,
+                "use_tls": "on",
+                "timeout_seconds": "10",
+                "enabled": "on",
+            },
+            follow_redirects=False,
+        )
+
+        assert response.status_code == 303
+        session.refresh(smtp_config)
+        assert smtp_config.encrypted_password != original_encrypted_password
+        assert smtp_config.encrypted_password != "replacement-password"
+    finally:
+        app.dependency_overrides.clear()
+        get_settings.cache_clear()
+
+
+def test_delete_smtp_settings_deletes_config(monkeypatch, session):
+    smtp_config = _create_smtp_config(session)
+    client, get_settings, app = _client_with_admin(monkeypatch, session)
+    try:
+        response = client.post(f"/settings/smtp/{smtp_config.id}/delete", follow_redirects=False)
+
+        assert response.status_code == 303
+        assert response.headers["location"] == "/settings"
+        assert session.get(SmtpConfig, smtp_config.id) is None
+    finally:
+        app.dependency_overrides.clear()
+        get_settings.cache_clear()
+
+
+@pytest.mark.parametrize("path", ["/settings/smtp/1", "/settings/smtp/1/delete"])
+def test_smtp_settings_update_and_delete_require_admin_session(monkeypatch, path):
+    _set_required_settings(monkeypatch)
+    create_app, get_settings = _load_create_app()
+    try:
+        client = TestClient(create_app())
+
+        response = _post_as_unauthenticated(client, path)
+
+        assert response.status_code == 401
+    finally:
+        get_settings.cache_clear()
+
+
 def test_test_sql_server_settings_reports_success(monkeypatch, session):
     data_source = _create_data_source(session)
     fake_client = FakeSyntaxSqlClient()
