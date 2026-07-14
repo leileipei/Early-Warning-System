@@ -1666,6 +1666,65 @@ def test_settings_page_lists_data_sources_and_smtp_configs(monkeypatch, session)
         get_settings.cache_clear()
 
 
+def test_settings_page_includes_sql_server_delete_action(monkeypatch, session):
+    data_source = _create_data_source(session)
+    client, get_settings, app = _client_with_admin(monkeypatch, session)
+    try:
+        response = client.get("/settings")
+
+        assert response.status_code == 200
+        assert f"/settings/sql-server/{data_source.id}/delete" in response.text
+        assert "确认删除该数据源吗？" in response.text
+    finally:
+        app.dependency_overrides.clear()
+        get_settings.cache_clear()
+
+
+def test_delete_sql_server_settings_deletes_unreferenced_source(monkeypatch, session):
+    data_source = _create_data_source(session)
+    client, get_settings, app = _client_with_admin(monkeypatch, session)
+    try:
+        response = client.post(
+            f"/settings/sql-server/{data_source.id}/delete", follow_redirects=False
+        )
+
+        assert response.status_code == 303
+        assert response.headers["location"] == "/settings"
+        assert session.get(SqlDataSource, data_source.id) is None
+    finally:
+        app.dependency_overrides.clear()
+        get_settings.cache_clear()
+
+
+def test_delete_sql_server_settings_rejects_referenced_source(monkeypatch, session):
+    data_source = _create_data_source(session)
+    rule = _create_rule(session, data_source, name="订单预警")
+    client, get_settings, app = _client_with_admin(monkeypatch, session)
+    try:
+        response = client.post(f"/settings/sql-server/{data_source.id}/delete")
+
+        assert response.status_code == 400
+        assert "数据源正在被规则引用：订单预警" in response.text
+        assert session.get(SqlDataSource, data_source.id) is not None
+        assert session.get(AlertRule, rule.id) is not None
+    finally:
+        app.dependency_overrides.clear()
+        get_settings.cache_clear()
+
+
+def test_delete_sql_server_settings_requires_admin_session(monkeypatch):
+    _set_required_settings(monkeypatch)
+    create_app, get_settings = _load_create_app()
+    try:
+        client = TestClient(create_app())
+
+        response = _post_as_unauthenticated(client, "/settings/sql-server/1/delete")
+
+        assert response.status_code == 401
+    finally:
+        get_settings.cache_clear()
+
+
 def test_test_sql_server_settings_reports_success(monkeypatch, session):
     data_source = _create_data_source(session)
     fake_client = FakeSyntaxSqlClient()

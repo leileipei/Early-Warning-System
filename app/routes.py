@@ -1169,6 +1169,41 @@ def test_sql_server_settings(
     )
 
 
+@router.post("/settings/sql-server/{source_id}/delete")
+def delete_sql_server_settings(
+    source_id: int,
+    request: Request,
+    admin: AdminUser = Depends(require_admin),
+    session: Session = Depends(get_session),
+):
+    data_source = session.get(SqlDataSource, source_id)
+    if data_source is None:
+        raise HTTPException(status_code=404, detail="数据源不存在")
+
+    rules = session.exec(
+        select(AlertRule)
+        .where(AlertRule.data_source_id == source_id)
+        .order_by(AlertRule.name)
+    ).all()
+    if rules:
+        rule_names = "、".join(rule.name for rule in rules)
+        return _template_response(
+            request,
+            "settings.html",
+            _settings_context(
+                request,
+                admin,
+                session,
+                error=f"数据源正在被规则引用：{rule_names}",
+            ),
+            status_code=400,
+        )
+
+    session.delete(data_source)
+    session.commit()
+    return RedirectResponse("/settings", status_code=303)
+
+
 @router.post("/settings/sql-server/{source_id}")
 def update_sql_server_settings(
     source_id: int,
