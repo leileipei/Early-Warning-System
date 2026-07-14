@@ -1,0 +1,61 @@
+{% extends "base.html" %}
+{% from "_csrf.html" import csrf_input %}
+
+{% block content %}
+<section class="page-header">
+  <div>
+    <p class="eyebrow">SMTP</p>
+    <h1>编辑 SMTP 配置</h1>
+  </div>
+  <a class="button button-secondary" href="/settings">返回</a>
+</section>
+
+<section class="panel">
+  {% if error %}
+  <p class="form-error">{{ error }}</p>
+  {% endif %}
+  <form class="stacked-form" method="post" action="{{ action }}">
+    {{ csrf_input(csrf_token) }}
+    <label>
+      <span>服务器</span>
+      <input name="host" value="{{ form.get('host', '') }}" required>
+    </label>
+    <label>
+      <span>端口</span>
+      <input name="port" type="number" value="{{ form.get('port', '587') }}" min="1" required>
+    </label>
+    <label>
+      <span>用户名</span>
+      <input name="username" value="{{ form.get('username', '') }}" required>
+    </label>
+    <label>
+      <span>密码</span>
+      <input name="password" type="password" placeholder="留空则不修改">
+    </label>
+    <label>
+      <span>发件人</span>
+      <input name="sender" value="{{ form.get('sender', '') }}" required>
+    </label>
+    <label>
+      <span>超时（秒）</span>
+      <input name="timeout_seconds" type="number" value="{{ form.get('timeout_seconds', '10') }}" min="1">
+    </label>
+    <label>
+      <span>TLS</span>
+      <input name="use_tls" type="checkbox" {% if form.get('use_tls') %}checked{% endif %}>
+    </label>
+    <label>
+      <span>SSL</span>
+      <input name="use_ssl" type="checkbox" {% if form.get('use_ssl') %}checked{% endif %}>
+    </label>
+    <label>
+      <span>启用</span>
+      <input name="enabled" type="checkbox" {% if form.get('enabled') %}checked{% endif %}>
+    </label>
+    <div class="button-row">
+      <button class="button" type="submit">保存</button>
+      <a class="button button-secondary" href="/settings">取消</a>
+    </div>
+  </form>
+</section>
+{% endblock %}

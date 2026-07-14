@@ -576,6 +576,20 @@ def _data_source_to_form(data_source: SqlDataSource) -> dict[str, str]:
     }
 
 
+def _smtp_config_to_form(smtp_config: SmtpConfig) -> dict[str, str]:
+    return {
+        "host": smtp_config.host,
+        "port": str(smtp_config.port),
+        "username": smtp_config.username,
+        "password": "",
+        "sender": smtp_config.sender,
+        "use_tls": "on" if smtp_config.use_tls else "",
+        "use_ssl": "on" if smtp_config.use_ssl else "",
+        "enabled": "on" if smtp_config.enabled else "",
+        "timeout_seconds": str(smtp_config.timeout_seconds),
+    }
+
+
 def _submitted_data_source_form(
     name: str,
     host: str,
@@ -1169,6 +1183,41 @@ def test_sql_server_settings(
     )
 
 
+@router.post("/settings/sql-server/{source_id}/delete")
+def delete_sql_server_settings(
+    source_id: int,
+    request: Request,
+    admin: AdminUser = Depends(require_admin),
+    session: Session = Depends(get_session),
+):
+    data_source = session.get(SqlDataSource, source_id)
+    if data_source is None:
+        raise HTTPException(status_code=404, detail="数据源不存在")
+
+    rules = session.exec(
+        select(AlertRule)
+        .where(AlertRule.data_source_id == source_id)
+        .order_by(AlertRule.name)
+    ).all()
+    if rules:
+        rule_names = "、".join(rule.name for rule in rules)
+        return _template_response(
+            request,
+            "settings.html",
+            _settings_context(
+                request,
+                admin,
+                session,
+                error=f"数据源正在被规则引用：{rule_names}",
+            ),
+            status_code=400,
+        )
+
+    session.delete(data_source)
+    session.commit()
+    return RedirectResponse("/settings", status_code=303)
+
+
 @router.post("/settings/sql-server/{source_id}")
 def update_sql_server_settings(
     source_id: int,
@@ -1270,6 +1319,81 @@ def create_smtp_settings(
         timeout_seconds=timeout_seconds,
     )
     session.add(smtp_config)
+    session.commit()
+    return RedirectResponse("/settings", status_code=303)
+
+
+@router.get("/settings/smtp/{config_id}/edit", response_class=HTMLResponse)
+def edit_smtp_settings_page(
+    config_id: int,
+    request: Request,
+    admin: AdminUser = Depends(require_admin),
+    session: Session = Depends(get_session),
+):
+    smtp_config = session.get(SmtpConfig, config_id)
+    if smtp_config is None:
+        raise HTTPException(status_code=404, detail="SMTP 配置不存在")
+    return _template_response(
+        request,
+        "smtp_form.html",
+        {
+            "admin": admin,
+            "title": "编辑 SMTP 配置",
+            "form": _smtp_config_to_form(smtp_config),
+            "action": f"/settings/smtp/{config_id}",
+            "error": "",
+        },
+    )
+
+
+@router.post("/settings/smtp/{config_id}")
+def update_smtp_settings(
+    config_id: int,
+    host: str = Form(""),
+    port: int = Form(587),
+    username: str = Form(""),
+    password: str = Form(""),
+    sender: str = Form(""),
+    use_tls: str | None = Form(None),
+    use_ssl: str | None = Form(None),
+    enabled: str | None = Form(None),
+    timeout_seconds: int = Form(10),
+    admin: AdminUser = Depends(require_admin),
+    session: Session = Depends(get_session),
+):
+    _ = admin
+    smtp_config = session.get(SmtpConfig, config_id)
+    if smtp_config is None:
+        raise HTTPException(status_code=404, detail="SMTP 配置不存在")
+
+    smtp_config.host = host
+    smtp_config.port = port
+    smtp_config.username = username
+    if password:
+        smtp_config.encrypted_password = _cipher().encrypt(password)
+    smtp_config.sender = sender
+    smtp_config.use_tls = _is_checked(use_tls)
+    smtp_config.use_ssl = _is_checked(use_ssl)
+    smtp_config.enabled = _is_checked(enabled)
+    smtp_config.timeout_seconds = timeout_seconds
+    smtp_config.updated_at = utc_now()
+    session.add(smtp_config)
+    session.commit()
+    return RedirectResponse("/settings", status_code=303)
+
+
+@router.post("/settings/smtp/{config_id}/delete")
+def delete_smtp_settings(
+    config_id: int,
+    admin: AdminUser = Depends(require_admin),
+    session: Session = Depends(get_session),
+):
+    _ = admin
+    smtp_config = session.get(SmtpConfig, config_id)
+    if smtp_config is None:
+        raise HTTPException(status_code=404, detail="SMTP 配置不存在")
+
+    session.delete(smtp_config)
     session.commit()
     return RedirectResponse("/settings", status_code=303)
 
