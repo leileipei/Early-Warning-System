@@ -179,8 +179,8 @@ def test_navigation_marks_the_current_page(monkeypatch, session):
         response = client.get("/rules")
 
         assert response.status_code == 200
-        assert 'class="nav-link is-active" href="/rules"' in response.text
-        assert 'class="nav-link" href="/logs"' in response.text
+        assert 'class="nav-link is-active" href="/rules" aria-current="page"' in response.text
+        assert 'class="nav-link" href="/logs">日志</a>' in response.text
     finally:
         get_settings.cache_clear()
 

@@ -67,6 +67,14 @@ a {
   color: var(--text);
 }
 
+.nav-link:focus-visible,
+.button:focus-visible,
+button:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+  box-shadow: 0 0 0 4px rgba(23, 92, 211, 0.24);
+}
+
 .logout-form {
   margin-left: auto;
 }
@@ -192,7 +200,7 @@ a {
 .form-success {
   border-color: #abefc6;
   background: #f6fef9;
-  color: #067647;
+  color: var(--success);
 }
 
 label {
@@ -323,7 +331,7 @@ button:hover {
 }
 
 .field-feedback.is-success {
-  color: #067647;
+  color: var(--success);
 }
 
 .field-feedback.is-error {
