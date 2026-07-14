@@ -63,7 +63,7 @@ class PyodbcSqlServerClient:
         if server_override.strip():
             server_fragment = f"SERVER={odbc_brace_escape(server_override.strip())};"
         else:
-            server_fragment = f"SERVER={odbc_brace_escape(host)},{port};"
+            server_fragment = f"SERVER={odbc_brace_escape(f'{host},{port}')};"
         self.connection_string = (
             f"DRIVER={odbc_brace_escape(odbc_driver)};"
             f"{server_fragment}"
@@ -89,8 +89,8 @@ class PyodbcSqlServerClient:
 
         executable_sql = strip_single_trailing_semicolon(sql)
         with pyodbc.connect(self.connection_string) as connection:
+            connection.timeout = timeout_seconds
             cursor = connection.cursor()
-            cursor.timeout = timeout_seconds
             cursor.execute(executable_sql)
             return rows_from_cursor_limited(cursor, max_rows)
 
@@ -105,6 +105,6 @@ class PyodbcSqlServerClient:
         executable_sql = strip_single_trailing_semicolon(sql)
         parse_only_batch = f"SET PARSEONLY ON;\n{executable_sql};\nSET PARSEONLY OFF;"
         with pyodbc.connect(self.connection_string) as connection:
+            connection.timeout = timeout_seconds
             cursor = connection.cursor()
-            cursor.timeout = timeout_seconds
             cursor.execute(parse_only_batch)
