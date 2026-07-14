@@ -67,6 +67,7 @@ a {
   color: var(--text);
 }
 
+.brand:focus-visible,
 .nav-link:focus-visible,
 .button:focus-visible,
 button:focus-visible {
