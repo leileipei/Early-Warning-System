@@ -92,6 +92,7 @@ class AlertRule(SQLModel, table=True):
     suppression_key_field: str = ""
     suppression_window_hours: int = 24
     created_at: datetime = Field(default_factory=utc_now)
+    archived_at: Optional[datetime] = None
     updated_at: datetime = Field(default_factory=utc_now)
 
 

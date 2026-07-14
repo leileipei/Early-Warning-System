@@ -86,6 +86,7 @@ def migrate_sqlite_schema(engine: Engine) -> None:
         "suppress_duplicates": "BOOLEAN NOT NULL DEFAULT 0",
         "suppression_key_field": "VARCHAR NOT NULL DEFAULT ''",
         "suppression_window_hours": "INTEGER NOT NULL DEFAULT 24",
+        "archived_at": "TIMESTAMP",
     }
     with engine.begin() as connection:
         for column_name, ddl in rule_columns_to_add.items():

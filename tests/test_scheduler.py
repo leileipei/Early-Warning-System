@@ -4,7 +4,7 @@ from unittest.mock import Mock
 import pytest
 from apscheduler.triggers.cron import CronTrigger
 
-from app.models import AlertRule, SendMode
+from app.models import AlertRule, SendMode, utc_now
 from app.scheduler import RuleScheduleSynchronizer, build_scheduler
 
 
@@ -48,6 +48,18 @@ def test_scheduler_skips_disabled_and_unsaved_rules():
     jobs = scheduler.get_jobs()
 
     assert [job.id for job in jobs] == ["rule-2"]
+
+
+def test_scheduler_skips_archived_enabled_rules():
+    scheduler = build_scheduler(
+        [
+            make_rule(id=1),
+            make_rule(id=2, archived_at=utc_now()),
+        ],
+        execute_rule=lambda rule_id: None,
+    )
+
+    assert [job.id for job in scheduler.get_jobs()] == ["rule-1"]
 
 
 def test_scheduler_adds_multiple_rules_with_stable_ids():
@@ -187,6 +199,15 @@ def test_rule_synchronizer_removes_disabled_or_deleted_rules():
 
     assert scheduler.get_job("rule-7") is None
     assert scheduler.get_job("rule-8") is None
+
+
+def test_rule_synchronizer_removes_archived_rule():
+    scheduler = build_scheduler([make_rule(id=7)], execute_rule=lambda rule_id: None)
+    synchronizer = RuleScheduleSynchronizer(scheduler, execute_rule=lambda rule_id: None)
+
+    synchronizer.sync([make_rule(id=7, archived_at=utc_now())])
+
+    assert scheduler.get_job("rule-7") is None
 
 
 def test_rule_synchronizer_removes_preexisting_disabled_or_deleted_rules():

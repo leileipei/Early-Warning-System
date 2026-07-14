@@ -64,6 +64,10 @@
                 {{ csrf_input(csrf_token) }}
                 <button class="button button-secondary" type="submit">手动执行</button>
               </form>
+              <form class="inline-form" method="post" action="/rules/{{ rule.id }}/delete" onsubmit="return confirm('确认删除该规则吗？')">
+                {{ csrf_input(csrf_token) }}
+                <button class="button button-secondary" type="submit">删除</button>
+              </form>
             </div>
           </td>
         </tr>

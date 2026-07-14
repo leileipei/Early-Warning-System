@@ -7,6 +7,7 @@ from app.mailer import MailSendResult
 from app.models import (
     AlertRule,
     AlertSuppression,
+    ExecutionLog,
     ExecutionStatus,
     MailLog,
     MailStatus,
@@ -14,6 +15,7 @@ from app.models import (
     SmtpConfig,
     SqlDataSource,
     TriggerType,
+    utc_now,
 )
 
 
@@ -489,6 +491,16 @@ def test_execute_rule_by_id_persists_failed_execution_when_sql_client_fails(monk
     assert execution_log.duration_ms >= 0
     assert execution_log.finished_at is not None
     assert session.exec(select(MailLog)).all() == []
+
+
+def test_execute_rule_by_id_rejects_archived_rule_without_execution_log(session):
+    data_source = persist_data_source(session)
+    rule = persist_rule(session, data_source, archived_at=utc_now())
+
+    with pytest.raises(execution_service.RuleNotFoundError):
+        execution_service.execute_rule_by_id(session, rule.id)
+
+    assert session.exec(select(ExecutionLog)).all() == []
 
 
 def test_execute_rule_by_id_retries_transient_sql_failure_then_persists_success(monkeypatch, session):

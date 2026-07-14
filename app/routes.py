@@ -69,6 +69,13 @@ def _is_checked(value: str | None) -> bool:
     return value in {"on", "true", "1"}
 
 
+def _get_active_rule_or_404(session: Session, rule_id: int) -> AlertRule:
+    rule = session.get(AlertRule, rule_id)
+    if rule is None or rule.archived_at is not None:
+        raise HTTPException(status_code=404, detail="规则不存在")
+    return rule
+
+
 def _has_recipient_text(value: str) -> bool:
     return any(recipient.strip() for recipient in (value or "").replace(";", ",").split(","))
 
@@ -189,7 +196,11 @@ def _rules_page_context(
     *,
     error: str = "",
 ) -> dict:
-    rules = session.exec(select(AlertRule).order_by(AlertRule.created_at.desc())).all()
+    rules = session.exec(
+        select(AlertRule)
+        .where(AlertRule.archived_at.is_(None))
+        .order_by(AlertRule.created_at.desc())
+    ).all()
     imported = request.query_params.get("imported", "")
     notice = f"成功导入 {imported} 条规则" if imported.isdigit() else ""
     return {
@@ -203,7 +214,11 @@ def _rules_page_context(
 
 
 def _rule_export_payload(session: Session) -> dict:
-    rules = session.exec(select(AlertRule).order_by(AlertRule.created_at.desc())).all()
+    rules = session.exec(
+        select(AlertRule)
+        .where(AlertRule.archived_at.is_(None))
+        .order_by(AlertRule.created_at.desc())
+    ).all()
     data_sources = {source.id: source.name for source in session.exec(select(SqlDataSource)).all()}
     return {
         "version": 1,
@@ -896,9 +911,7 @@ def edit_rule_page(
     admin: AdminUser = Depends(require_admin),
     session: Session = Depends(get_session),
 ):
-    rule = session.get(AlertRule, rule_id)
-    if rule is None:
-        raise HTTPException(status_code=404, detail="规则不存在")
+    rule = _get_active_rule_or_404(session, rule_id)
     return _template_response(
         request,
         "rule_form.html",
@@ -920,9 +933,7 @@ def rule_versions_page(
     admin: AdminUser = Depends(require_admin),
     session: Session = Depends(get_session),
 ):
-    rule = session.get(AlertRule, rule_id)
-    if rule is None:
-        raise HTTPException(status_code=404, detail="规则不存在")
+    rule = _get_active_rule_or_404(session, rule_id)
     versions = session.exec(
         select(AlertRuleVersion)
         .where(AlertRuleVersion.rule_id == rule_id)
@@ -953,9 +964,7 @@ def copy_rule_page(
     admin: AdminUser = Depends(require_admin),
     session: Session = Depends(get_session),
 ):
-    rule = session.get(AlertRule, rule_id)
-    if rule is None:
-        raise HTTPException(status_code=404, detail="规则不存在")
+    rule = _get_active_rule_or_404(session, rule_id)
     return _template_response(
         request,
         "rule_form.html",
@@ -994,9 +1003,7 @@ def update_rule(
     admin: AdminUser = Depends(require_admin),
     session: Session = Depends(get_session),
 ):
-    rule = session.get(AlertRule, rule_id)
-    if rule is None:
-        raise HTTPException(status_code=404, detail="规则不存在")
+    rule = _get_active_rule_or_404(session, rule_id)
 
     form = _submitted_rule_form(
         name,
@@ -1052,6 +1059,23 @@ def update_rule(
     return RedirectResponse("/rules", status_code=303)
 
 
+@router.post("/rules/{rule_id}/delete")
+def archive_rule(
+    rule_id: int,
+    admin: AdminUser = Depends(require_admin),
+    session: Session = Depends(get_session),
+):
+    _ = admin
+    rule = _get_active_rule_or_404(session, rule_id)
+    now = utc_now()
+    rule.enabled = False
+    rule.archived_at = now
+    rule.updated_at = now
+    session.add(rule)
+    session.commit()
+    return RedirectResponse("/rules", status_code=303)
+
+
 @router.post("/rules/{rule_id}/run")
 def run_rule(
     rule_id: int,
@@ -1059,8 +1083,7 @@ def run_rule(
     session: Session = Depends(get_session),
 ):
     _ = admin
-    if session.get(AlertRule, rule_id) is None:
-        raise HTTPException(status_code=404, detail="规则不存在")
+    _get_active_rule_or_404(session, rule_id)
 
     execute_rule_by_id(session, rule_id, trigger_type=TriggerType.MANUAL)
     return RedirectResponse("/logs", status_code=303)
