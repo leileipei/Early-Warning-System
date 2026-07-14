@@ -1,6 +1,7 @@
 import importlib
 import json
 import re
+from datetime import datetime
 from pathlib import Path
 
 import pytest
@@ -12,6 +13,7 @@ from app.models import (
     AdminUser,
     AlertRule,
     AlertRuleVersion,
+    AlertSuppression,
     ExecutionLog,
     ExecutionStatus,
     MailLog,
@@ -647,11 +649,134 @@ def test_rules_page_lists_existing_rules(monkeypatch, session):
         assert f"/rules/{rule.id}/edit" in response.text
         assert f"/rules/{rule.id}/copy" in response.text
         assert f"/rules/{rule.id}/versions" in response.text
+        assert f'action="/rules/{rule.id}/delete"' in response.text
+        assert 'name="_csrf_token"' in response.text
         assert "复制" in response.text
         assert "历史" in response.text
         assert "手动执行" in response.text
+        assert "删除" in response.text
     finally:
         app.dependency_overrides.clear()
+        get_settings.cache_clear()
+
+
+def test_archive_rule_marks_it_inactive_and_preserves_related_records(monkeypatch, session):
+    data_source = _create_data_source(session)
+    rule = _create_rule(session, data_source)
+    rule.updated_at = datetime(2000, 1, 1)
+    version = AlertRuleVersion(
+        rule_id=rule.id,
+        version_number=1,
+        changed_by="admin",
+        snapshot_json="{}",
+    )
+    execution_log = ExecutionLog(rule_id=rule.id, trigger_type=TriggerType.MANUAL)
+    suppression = AlertSuppression(rule_id=rule.id, suppression_key="order-1")
+    session.add(rule)
+    session.add(version)
+    session.add(execution_log)
+    session.add(suppression)
+    session.commit()
+    session.refresh(version)
+    session.refresh(execution_log)
+    session.refresh(suppression)
+    mail_log = MailLog(
+        execution_log_id=execution_log.id,
+        recipients="ops@example.com",
+        subject="大额订单预警",
+        status=MailStatus.SUCCESS,
+    )
+    session.add(mail_log)
+    session.commit()
+    session.refresh(mail_log)
+    client, get_settings, app = _client_with_admin(monkeypatch, session)
+    try:
+        app.dependency_overrides.pop(require_csrf)
+        csrf_token = _csrf_token(client)
+
+        response = client.post(
+            f"/rules/{rule.id}/delete",
+            data={"_csrf_token": csrf_token},
+            follow_redirects=False,
+        )
+
+        assert response.status_code == 303
+        assert response.headers["location"] == "/rules"
+        session.refresh(rule)
+        assert rule.enabled is False
+        assert rule.archived_at is not None
+        assert rule.updated_at > datetime(2000, 1, 1)
+        assert session.get(AlertRuleVersion, version.id) is not None
+        assert session.get(ExecutionLog, execution_log.id) is not None
+        assert session.get(MailLog, mail_log.id) is not None
+        assert session.get(AlertSuppression, suppression.id) is not None
+    finally:
+        app.dependency_overrides.clear()
+        get_settings.cache_clear()
+
+
+def test_archived_rules_are_omitted_from_rules_page_and_export(monkeypatch, session):
+    data_source = _create_data_source(session)
+    active_rule = _create_rule(session, data_source, name="活动规则")
+    archived_rule = _create_rule(
+        session,
+        data_source,
+        name="已归档规则",
+        archived_at=datetime(2000, 1, 1),
+    )
+    client, get_settings, app = _client_with_admin(monkeypatch, session)
+    try:
+        rules_page = client.get("/rules")
+        export = client.get("/rules/export.json")
+
+        assert rules_page.status_code == 200
+        assert active_rule.name in rules_page.text
+        assert archived_rule.name not in rules_page.text
+        assert [rule["name"] for rule in export.json()["rules"]] == [active_rule.name]
+    finally:
+        app.dependency_overrides.clear()
+        get_settings.cache_clear()
+
+
+@pytest.mark.parametrize(
+    ("method", "path_suffix"),
+    [
+        ("get", "/edit"),
+        ("get", "/copy"),
+        ("get", "/versions"),
+        ("post", ""),
+        ("post", "/run"),
+        ("post", "/delete"),
+    ],
+)
+def test_archived_rule_actions_return_not_found(monkeypatch, session, method, path_suffix):
+    data_source = _create_data_source(session)
+    rule = _create_rule(session, data_source, archived_at=datetime(2000, 1, 1))
+    client, get_settings, app = _client_with_admin(monkeypatch, session)
+    try:
+        path = f"/rules/{rule.id}{path_suffix}"
+        if method == "post" and not path_suffix:
+            response = client.post(path, data=_valid_rule_form(data_source.id))
+        else:
+            response = getattr(client, method)(path)
+
+        assert response.status_code == 404
+        assert response.json()["detail"] == "规则不存在"
+    finally:
+        app.dependency_overrides.clear()
+        get_settings.cache_clear()
+
+
+def test_archive_rule_requires_login(monkeypatch):
+    _set_required_settings(monkeypatch)
+    create_app, get_settings = _load_create_app()
+    try:
+        client = TestClient(create_app())
+
+        response = _post_as_unauthenticated(client, "/rules/1/delete")
+
+        assert response.status_code == 401
+    finally:
         get_settings.cache_clear()
 
 
