@@ -173,6 +173,18 @@ def test_app_title_uses_configured_app_name(monkeypatch):
         get_settings.cache_clear()
 
 
+def test_navigation_marks_the_current_page(monkeypatch, session):
+    client, get_settings, _ = _client_with_admin(monkeypatch, session)
+    try:
+        response = client.get("/rules")
+
+        assert response.status_code == 200
+        assert 'class="nav-link is-active" href="/rules"' in response.text
+        assert 'class="nav-link" href="/logs"' in response.text
+    finally:
+        get_settings.cache_clear()
+
+
 def test_settings_require_secret_values(tmp_path, monkeypatch):
     monkeypatch.delenv("SESSION_SECRET", raising=False)
     monkeypatch.delenv("SECRET_KEY", raising=False)
