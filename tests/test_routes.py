@@ -2340,6 +2340,7 @@ def test_logs_page_lists_execution_and_mail_logs(monkeypatch, session):
         response = client.get("/logs")
 
         assert response.status_code == 200
+        assert response.text.count('class="panel table-panel"') >= 2
         assert "/logs/executions.csv" in response.text
         assert "/logs/mails.csv" in response.text
         assert "导出执行日志" in response.text
@@ -2355,6 +2356,12 @@ def test_logs_page_lists_execution_and_mail_logs(monkeypatch, session):
     finally:
         app.dependency_overrides.clear()
         get_settings.cache_clear()
+
+
+def test_table_panel_section_headings_align_with_table_content():
+    stylesheet = Path("app/static/styles.css").read_text(encoding="utf-8")
+
+    assert ".table-panel > .section-heading {\n  padding: 18px 18px 0;\n}" in stylesheet
 
 
 def test_logs_page_filters_execution_logs_by_status_trigger_and_rule(monkeypatch, session):

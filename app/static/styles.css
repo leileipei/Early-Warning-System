@@ -393,6 +393,10 @@ button:hover {
   padding: 0 18px;
 }
 
+.table-panel > .section-heading {
+  padding: 18px 18px 0;
+}
+
 table {
   width: 100%;
   border-collapse: collapse;
