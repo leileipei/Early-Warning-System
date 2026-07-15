@@ -15,100 +15,116 @@
   <p class="form-error">{{ error }}</p>
   {% endif %}
   <form class="stacked-form" method="post" action="{{ action }}">
-    {{ csrf_input(csrf_token) }}
-    <label>
-      <span>规则名称</span>
-      <input name="name" value="{{ form.get('name', '') }}" placeholder="例如：库存低水位预警" required>
-    </label>
-    <label>
-      <span>数据源</span>
-      <select name="data_source_id" required>
-        <option value="">请选择数据源</option>
-        {% for data_source in data_sources %}
-        <option value="{{ data_source.id }}" {% if form.get('data_source_id') == data_source.id|string %}selected{% endif %}>
-          {{ data_source.name }} / {{ data_source.host }}
-        </option>
-        {% endfor %}
-      </select>
-    </label>
-    <label>
-      <span>SQL 查询</span>
-      <textarea name="sql_text" rows="8" placeholder="SELECT ..." data-sql-input required>{{ form.get('sql_text', '') }}</textarea>
-    </label>
-    <div class="sql-check-row">
-      <button class="button button-secondary" type="button" data-sql-check-button data-endpoint="/rules/validate-sql">检测 SQL</button>
-      <button class="button button-secondary" type="button" data-sql-preview-button data-endpoint="/rules/preview-sql">预览结果</button>
-      <span class="field-feedback" data-sql-check-result role="status" aria-live="polite"></span>
-    </div>
-    <div class="preview-panel" data-sql-preview-result aria-live="polite"></div>
-    <div class="form-row">
+    <section class="form-section">
+      {{ csrf_input(csrf_token) }}
       <label>
-        <span>Cron 表达式</span>
-        <input name="cron_expression" value="{{ form.get('cron_expression', '0 9 * * *') }}" required>
+        <span>规则名称</span>
+        <input name="name" value="{{ form.get('name', '') }}" placeholder="例如：库存低水位预警" required>
       </label>
       <label>
-        <span>收件人</span>
-        <input name="recipients" value="{{ form.get('recipients', '') }}" placeholder="ops@example.com">
-      </label>
-    </div>
-    <label>
-      <span>抄送</span>
-      <input name="cc_recipients" value="{{ form.get('cc_recipients', '') }}" placeholder="team@example.com">
-    </label>
-    <div class="form-row">
-      <label>
-        <span>动态收件人字段</span>
-        <input name="dynamic_recipient_field" value="{{ form.get('dynamic_recipient_field', '') }}" placeholder="例如：owner_email">
-      </label>
-      <label>
-        <span>动态抄送字段</span>
-        <input name="dynamic_cc_field" value="{{ form.get('dynamic_cc_field', '') }}" placeholder="例如：manager_email">
-      </label>
-    </div>
-    <label>
-      <span>邮件主题</span>
-      <input name="subject_template" value="{{ form.get('subject_template', '') }}" required>
-    </label>
-    <label>
-      <span>邮件正文</span>
-      <textarea name="body_template" rows="6" required>{{ form.get('body_template', '') }}</textarea>
-    </label>
-    <div class="form-row">
-      <label>
-        <span>发送方式</span>
-        <select name="send_mode">
-          <option value="summary" {% if form.get('send_mode', 'summary') == 'summary' %}selected{% endif %}>汇总一封</option>
-          <option value="per_row" {% if form.get('send_mode') == 'per_row' %}selected{% endif %}>每行一封</option>
+        <span>数据源</span>
+        <select name="data_source_id" required>
+          <option value="">请选择数据源</option>
+          {% for data_source in data_sources %}
+          <option value="{{ data_source.id }}" {% if form.get('data_source_id') == data_source.id|string %}selected{% endif %}>
+            {{ data_source.name }} / {{ data_source.host }}
+          </option>
+          {% endfor %}
         </select>
       </label>
+    </section>
+    <section class="form-section sql-workspace">
+      <div class="section-heading">
+        <div>
+          <h2>SQL 查询</h2>
+          <p class="section-description">仅允许只读 SELECT 或 WITH 查询。</p>
+        </div>
+      </div>
       <label>
-        <span>查询超时（秒）</span>
-        <input name="query_timeout_seconds" type="number" value="{{ form.get('query_timeout_seconds', '30') }}" min="1">
+        <span>SQL 查询</span>
+        <textarea name="sql_text" rows="8" placeholder="SELECT ..." data-sql-input required>{{ form.get('sql_text', '') }}</textarea>
+      </label>
+      <div class="sql-check-row">
+        <button class="button button-secondary" type="button" data-sql-check-button data-endpoint="/rules/validate-sql">检测 SQL</button>
+        <button class="button button-secondary" type="button" data-sql-preview-button data-endpoint="/rules/preview-sql">预览结果</button>
+        <span class="field-feedback" data-sql-check-result role="status" aria-live="polite"></span>
+      </div>
+      <div class="preview-panel" data-sql-preview-result aria-live="polite"></div>
+    </section>
+    <section class="form-section">
+      <div class="form-row">
+        <label>
+          <span>Cron 表达式</span>
+          <input name="cron_expression" value="{{ form.get('cron_expression', '0 9 * * *') }}" required>
+        </label>
+        <label>
+          <span>收件人</span>
+          <input name="recipients" value="{{ form.get('recipients', '') }}" placeholder="ops@example.com">
+        </label>
+      </div>
+      <label>
+        <span>抄送</span>
+        <input name="cc_recipients" value="{{ form.get('cc_recipients', '') }}" placeholder="team@example.com">
+      </label>
+      <div class="form-row">
+        <label>
+          <span>动态收件人字段</span>
+          <input name="dynamic_recipient_field" value="{{ form.get('dynamic_recipient_field', '') }}" placeholder="例如：owner_email">
+        </label>
+        <label>
+          <span>动态抄送字段</span>
+          <input name="dynamic_cc_field" value="{{ form.get('dynamic_cc_field', '') }}" placeholder="例如：manager_email">
+        </label>
+      </div>
+    </section>
+    <section class="form-section">
+      <label>
+        <span>邮件主题</span>
+        <input name="subject_template" value="{{ form.get('subject_template', '') }}" required>
       </label>
       <label>
-        <span>最大行数</span>
-        <input name="max_rows" type="number" value="{{ form.get('max_rows', '500') }}" min="1">
+        <span>邮件正文</span>
+        <textarea name="body_template" rows="6" required>{{ form.get('body_template', '') }}</textarea>
       </label>
-    </div>
-    <div class="form-row">
+      <div class="form-row">
+        <label>
+          <span>发送方式</span>
+          <select name="send_mode">
+            <option value="summary" {% if form.get('send_mode', 'summary') == 'summary' %}selected{% endif %}>汇总一封</option>
+            <option value="per_row" {% if form.get('send_mode') == 'per_row' %}selected{% endif %}>每行一封</option>
+          </select>
+        </label>
+        <label>
+          <span>查询超时（秒）</span>
+          <input name="query_timeout_seconds" type="number" value="{{ form.get('query_timeout_seconds', '30') }}" min="1">
+        </label>
+        <label>
+          <span>最大行数</span>
+          <input name="max_rows" type="number" value="{{ form.get('max_rows', '500') }}" min="1">
+        </label>
+      </div>
+    </section>
+    <section class="form-section">
+      <div class="form-row">
+        <label>
+          <span>重复预警抑制</span>
+          <input name="suppress_duplicates" type="checkbox" {% if form.get('suppress_duplicates', '') %}checked{% endif %}>
+        </label>
+        <label>
+          <span>去重字段</span>
+          <input name="suppression_key_field" value="{{ form.get('suppression_key_field', '') }}" placeholder="例如：order_id">
+        </label>
+        <label>
+          <span>抑制窗口（小时）</span>
+          <input name="suppression_window_hours" type="number" value="{{ form.get('suppression_window_hours', '24') }}" min="1">
+        </label>
+      </div>
       <label>
-        <span>重复预警抑制</span>
-        <input name="suppress_duplicates" type="checkbox" {% if form.get('suppress_duplicates', '') %}checked{% endif %}>
+        <span>启用</span>
+        <input name="enabled" type="checkbox" {% if form.get('enabled', 'on') %}checked{% endif %}>
       </label>
-      <label>
-        <span>去重字段</span>
-        <input name="suppression_key_field" value="{{ form.get('suppression_key_field', '') }}" placeholder="例如：order_id">
-      </label>
-      <label>
-        <span>抑制窗口（小时）</span>
-        <input name="suppression_window_hours" type="number" value="{{ form.get('suppression_window_hours', '24') }}" min="1">
-      </label>
-    </div>
-    <label>
-      <span>启用</span>
-      <input name="enabled" type="checkbox" {% if form.get('enabled', 'on') %}checked{% endif %}>
-    </label>
-    <div class="button-row">
+    </section>
+    <div class="button-row form-actions">
       <button class="button" type="submit">保存</button>
       <a class="button button-secondary" href="/rules">取消</a>
     </div>

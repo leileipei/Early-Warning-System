@@ -15,69 +15,75 @@
   <p class="form-error">{{ error }}</p>
   {% endif %}
   <form class="stacked-form" method="post" action="{{ action }}">
-    {{ csrf_input(csrf_token) }}
-    <label>
-      <span>名称</span>
-      <input name="name" value="{{ form.get('name', '') }}" required>
-    </label>
-    <label>
-      <span>主机</span>
-      <input name="host" value="{{ form.get('host', '') }}" required>
-    </label>
-    <label>
-      <span>端口</span>
-      <input name="port" type="number" value="{{ form.get('port', '1433') }}" required>
-    </label>
-    <label>
-      <span>数据库</span>
-      <input name="database" value="{{ form.get('database', '') }}" required>
-    </label>
-    <label>
-      <span>用户名</span>
-      <input name="username" value="{{ form.get('username', '') }}" required>
-    </label>
-    <label>
-      <span>密码</span>
-      <input name="password" type="password" placeholder="留空则不修改">
-    </label>
-    <label>
-      <span>连接超时（秒）</span>
-      <input name="connect_timeout_seconds" type="number" value="{{ form.get('connect_timeout_seconds', '10') }}" min="1">
-    </label>
-    <label>
-      <span>ODBC 驱动</span>
-      <input name="odbc_driver" value="{{ form.get('odbc_driver', 'ODBC Driver 18 for SQL Server') }}" required>
-    </label>
-    <label>
-      <span>服务器地址覆盖值</span>
-      <input name="server_override" value="{{ form.get('server_override', '') }}" placeholder="可选，例如 SERVER\INSTANCE 或 192.168.1.10,1433">
-    </label>
-    <div class="form-row">
+    <section class="form-section">
+      {{ csrf_input(csrf_token) }}
       <label>
-        <span>Encrypt</span>
-        <select name="encrypt">
-          <option value="yes" {% if form.get('encrypt', 'yes') == 'yes' %}selected{% endif %}>yes</option>
-          <option value="no" {% if form.get('encrypt') == 'no' %}selected{% endif %}>no</option>
-          <option value="optional" {% if form.get('encrypt') == 'optional' %}selected{% endif %}>optional</option>
-        </select>
+        <span>名称</span>
+        <input name="name" value="{{ form.get('name', '') }}" required>
       </label>
       <label>
-        <span>TrustServerCertificate</span>
-        <select name="trust_server_certificate">
-          <option value="yes" {% if form.get('trust_server_certificate', 'yes') == 'yes' %}selected{% endif %}>yes</option>
-          <option value="no" {% if form.get('trust_server_certificate') == 'no' %}selected{% endif %}>no</option>
-        </select>
+        <span>主机</span>
+        <input name="host" value="{{ form.get('host', '') }}" required>
       </label>
-    </div>
-    <label>
-      <span>额外连接参数</span>
-      <input name="extra_params" value="{{ form.get('extra_params', '') }}" placeholder="例如 ApplicationIntent=ReadOnly;MultiSubnetFailover=Yes;">
-    </label>
-    <label>
-      <span>启用</span>
-      <input name="enabled" type="checkbox" {% if form.get('enabled') %}checked{% endif %}>
-    </label>
-    <div class="button-row">
+      <label>
+        <span>端口</span>
+        <input name="port" type="number" value="{{ form.get('port', '1433') }}" required>
+      </label>
+      <label>
+        <span>数据库</span>
+        <input name="database" value="{{ form.get('database', '') }}" required>
+      </label>
+    </section>
+    <section class="form-section">
+      <label>
+        <span>用户名</span>
+        <input name="username" value="{{ form.get('username', '') }}" required>
+      </label>
+      <label>
+        <span>密码</span>
+        <input name="password" type="password" placeholder="留空则不修改">
+      </label>
+    </section>
+    <section class="form-section">
+      <label>
+        <span>连接超时（秒）</span>
+        <input name="connect_timeout_seconds" type="number" value="{{ form.get('connect_timeout_seconds', '10') }}" min="1">
+      </label>
+      <label>
+        <span>ODBC 驱动</span>
+        <input name="odbc_driver" value="{{ form.get('odbc_driver', 'ODBC Driver 18 for SQL Server') }}" required>
+      </label>
+      <label>
+        <span>服务器地址覆盖值</span>
+        <input name="server_override" value="{{ form.get('server_override', '') }}" placeholder="可选，例如 SERVER\INSTANCE 或 192.168.1.10,1433">
+      </label>
+      <div class="form-row">
+        <label>
+          <span>Encrypt</span>
+          <select name="encrypt">
+            <option value="yes" {% if form.get('encrypt', 'yes') == 'yes' %}selected{% endif %}>yes</option>
+            <option value="no" {% if form.get('encrypt') == 'no' %}selected{% endif %}>no</option>
+            <option value="optional" {% if form.get('encrypt') == 'optional' %}selected{% endif %}>optional</option>
+          </select>
+        </label>
+        <label>
+          <span>TrustServerCertificate</span>
+          <select name="trust_server_certificate">
+            <option value="yes" {% if form.get('trust_server_certificate', 'yes') == 'yes' %}selected{% endif %}>yes</option>
+            <option value="no" {% if form.get('trust_server_certificate') == 'no' %}selected{% endif %}>no</option>
+          </select>
+        </label>
+      </div>
+      <label>
+        <span>额外连接参数</span>
+        <input name="extra_params" value="{{ form.get('extra_params', '') }}" placeholder="例如 ApplicationIntent=ReadOnly;MultiSubnetFailover=Yes;">
+      </label>
+      <label>
+        <span>启用</span>
+        <input name="enabled" type="checkbox" {% if form.get('enabled') %}checked{% endif %}>
+      </label>
+    </section>
+    <div class="button-row form-actions">
       <button class="button" type="submit">保存</button>
       <a class="button button-secondary" href="/settings">取消</a>
     </div>

@@ -9,13 +9,14 @@
     <script src="/static/app.js" defer></script>
   </head>
   <body>
+    {% set current_path = request.url.path %}
     <header class="topbar">
       <a class="brand" href="/">SQL 预警系统</a>
       <nav class="nav-links" aria-label="主导航">
-        <a href="/">仪表盘</a>
-        <a href="/rules">规则</a>
-        <a href="/settings">配置</a>
-        <a href="/logs">日志</a>
+        <a class="nav-link{% if current_path == '/' %} is-active{% endif %}" href="/"{% if current_path == '/' %} aria-current="page"{% endif %}>仪表盘</a>
+        <a class="nav-link{% if current_path.startswith('/rules') %} is-active{% endif %}" href="/rules"{% if current_path.startswith('/rules') %} aria-current="page"{% endif %}>规则</a>
+        <a class="nav-link{% if current_path.startswith('/settings') %} is-active{% endif %}" href="/settings"{% if current_path.startswith('/settings') %} aria-current="page"{% endif %}>配置</a>
+        <a class="nav-link{% if current_path.startswith('/logs') %} is-active{% endif %}" href="/logs"{% if current_path.startswith('/logs') %} aria-current="page"{% endif %}>日志</a>
       </nav>
       <form class="logout-form" method="post" action="/logout">
         {{ csrf_input(csrf_token) }}

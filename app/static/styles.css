@@ -1,16 +1,19 @@
 :root {
   color-scheme: light;
-  --bg: #f5f7fa;
+  --bg: #f8fafc;
   --surface: #ffffff;
-  --surface-muted: #eef3f8;
-  --border: #d6dde7;
-  --border-strong: #b8c4d3;
-  --text: #172033;
+  --surface-muted: #f2f4f7;
+  --border: #d0d5dd;
+  --border-strong: #98a2b3;
+  --text: #182230;
   --muted: #667085;
-  --primary: #1f6feb;
-  --primary-hover: #1a5fd0;
-  --secondary-hover: #e5ebf3;
+  --primary: #175cd3;
+  --primary-hover: #004eeb;
+  --secondary-hover: #eaecf0;
+  --success: #067647;
+  --warning: #b54708;
   --danger: #b42318;
+  --danger-hover: #912018;
 }
 
 * {
@@ -52,15 +55,26 @@ a {
   gap: 6px;
 }
 
-.nav-links a {
-  border-radius: 6px;
-  color: #2f4b68;
-  padding: 8px 10px;
+.nav-link {
+  border-bottom: 2px solid transparent;
+  color: var(--muted);
+  padding: 18px 10px 16px;
   text-decoration: none;
 }
 
-.nav-links a:hover {
-  background: var(--surface-muted);
+.nav-link:hover,
+.nav-link.is-active {
+  border-bottom-color: var(--primary);
+  color: var(--text);
+}
+
+.brand:focus-visible,
+.nav-link:focus-visible,
+.button:focus-visible,
+button:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+  box-shadow: 0 0 0 4px rgba(23, 92, 211, 0.24);
 }
 
 .logout-form {
@@ -68,9 +82,29 @@ a {
 }
 
 .page {
-  max-width: 1120px;
+  max-width: 1280px;
   margin: 0 auto;
-  padding: 28px 24px 48px;
+  padding: 32px 28px 56px;
+}
+
+.page-heading {
+  display: grid;
+  gap: 4px;
+}
+
+.page-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+}
+
+.section-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 14px;
 }
 
 .page-header {
@@ -124,12 +158,30 @@ a {
 }
 
 .metric-card strong {
-  font-size: 30px;
+  font-size: 32px;
+  line-height: 1.15;
 }
 
 .metric-label,
+.status-text,
 .empty-state,
 .empty-cell {
+  color: var(--muted);
+}
+
+.status-success {
+  color: var(--success);
+}
+
+.status-warning {
+  color: var(--warning);
+}
+
+.status-danger {
+  color: var(--danger);
+}
+
+.status-muted {
   color: var(--muted);
 }
 
@@ -137,6 +189,10 @@ a {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 16px;
+}
+
+.two-column > * {
+  min-width: 0;
 }
 
 .stacked-form {
@@ -168,7 +224,7 @@ a {
 .form-success {
   border-color: #abefc6;
   background: #f6fef9;
-  color: #067647;
+  color: var(--success);
 }
 
 label {
@@ -237,11 +293,54 @@ button:hover {
   background: var(--secondary-hover);
 }
 
+.button-danger {
+  background: var(--danger);
+}
+
+.button-danger:hover {
+  background: var(--danger-hover);
+}
+
 .button-row {
   display: flex;
   flex-wrap: wrap;
   gap: 10px;
   align-items: center;
+}
+
+.form-section {
+  display: grid;
+  gap: 14px;
+  padding-top: 18px;
+  border-top: 1px solid var(--border);
+}
+
+.form-section:first-child {
+  padding-top: 0;
+  border-top: 0;
+}
+
+.form-actions {
+  margin-top: 8px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border);
+}
+
+.sql-workspace textarea {
+  min-height: 220px;
+  background: #fbfcfe;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+}
+
+.auth-shell {
+  display: grid;
+  max-width: 420px;
+  margin: 48px auto 0;
+}
+
+.auth-shell .auth-panel {
+  max-width: none;
+  margin: 0;
 }
 
 .filter-form {
@@ -299,7 +398,7 @@ button:hover {
 }
 
 .field-feedback.is-success {
-  color: #067647;
+  color: var(--success);
 }
 
 .field-feedback.is-error {
@@ -344,6 +443,24 @@ button:hover {
   overflow-x: auto;
 }
 
+.toolbar-panel {
+  margin-bottom: 16px;
+  padding: 16px 18px;
+}
+
+.table-panel {
+  padding: 0;
+  overflow: hidden;
+}
+
+.table-panel .table-shell {
+  padding: 0 18px;
+}
+
+.table-panel > .section-heading {
+  padding: 18px 18px 0;
+}
+
 table {
   width: 100%;
   border-collapse: collapse;
@@ -358,9 +475,15 @@ td {
 }
 
 th {
-  color: #344054;
-  font-size: 13px;
+  background: var(--surface-muted);
+  color: var(--muted);
+  font-size: 12px;
   font-weight: 700;
+  letter-spacing: 0;
+}
+
+tbody tr:hover {
+  background: #f8fbff;
 }
 
 .empty-cell {
@@ -401,7 +524,7 @@ th {
   .nav-links {
     order: 3;
     width: 100%;
-    overflow-x: auto;
+    flex-wrap: wrap;
   }
 
   .page {
@@ -420,6 +543,11 @@ th {
   }
 
   .filter-actions {
+    flex-wrap: wrap;
+  }
+
+  .page-actions,
+  .table-actions {
     flex-wrap: wrap;
   }
 

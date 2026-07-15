@@ -152,7 +152,7 @@ def test_rules_page_uses_workbench_list_regions(monkeypatch, session):
 
         assert response.status_code == 200
         assert 'class="page-heading"' in response.text
-        assert 'class="table-panel"' in response.text
+        assert 'class="panel table-panel"' in response.text
         assert 'action="/rules/1/run"' in response.text
     finally:
         get_settings.cache_clear()
@@ -162,7 +162,7 @@ def test_rules_page_uses_workbench_list_regions(monkeypatch, session):
 
 Run: `.venv/bin/python -m pytest tests/test_routes.py::test_rules_page_uses_workbench_list_regions -q`
 
-Expected: FAIL，因为模板尚未输出工作台区域类。
+Expected: FAIL，因为模板尚未输出 `panel table-panel` 工作台区域类。
 
 - [ ] **Step 3: 用语义类整理四个页面的既有结构**
 

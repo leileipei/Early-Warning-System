@@ -128,6 +128,15 @@ def test_password_hash_round_trip():
     assert not verify_password("wrong", password_hash)
 
 
+def test_login_page_uses_auth_shell(auth_app):
+    client = TestClient(auth_app)
+
+    response = client.get("/login")
+
+    assert response.status_code == 200
+    assert 'class="auth-shell"' in response.text
+
+
 def test_secret_cipher_round_trip():
     cipher = SecretCipher.from_key_material(Fernet.generate_key().decode())
 

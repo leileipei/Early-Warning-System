@@ -173,6 +173,18 @@ def test_app_title_uses_configured_app_name(monkeypatch):
         get_settings.cache_clear()
 
 
+def test_navigation_marks_the_current_page(monkeypatch, session):
+    client, get_settings, _ = _client_with_admin(monkeypatch, session)
+    try:
+        response = client.get("/rules")
+
+        assert response.status_code == 200
+        assert 'class="nav-link is-active" href="/rules" aria-current="page"' in response.text
+        assert 'class="nav-link" href="/logs">日志</a>' in response.text
+    finally:
+        get_settings.cache_clear()
+
+
 def test_settings_require_secret_values(tmp_path, monkeypatch):
     monkeypatch.delenv("SESSION_SECRET", raising=False)
     monkeypatch.delenv("SECRET_KEY", raising=False)
@@ -657,6 +669,52 @@ def test_rules_page_lists_existing_rules(monkeypatch, session):
         assert "删除" in response.text
     finally:
         app.dependency_overrides.clear()
+        get_settings.cache_clear()
+
+
+def test_rules_page_uses_workbench_list_regions(monkeypatch, session):
+    data_source = _create_data_source(session)
+    _create_rule(session, data_source)
+    client, get_settings, _ = _client_with_admin(monkeypatch, session)
+    try:
+        response = client.get("/rules")
+
+        assert response.status_code == 200
+        assert 'class="page-heading"' in response.text
+        assert 'class="panel table-panel"' in response.text
+        assert 'action="/rules/1/run"' in response.text
+    finally:
+        get_settings.cache_clear()
+
+
+def test_rules_page_uses_semantic_status_classes(monkeypatch, session):
+    data_source = _create_data_source(session)
+    _create_rule(session, data_source, name="启用规则", enabled=True)
+    _create_rule(session, data_source, name="停用规则", enabled=False)
+    client, get_settings, app = _client_with_admin(monkeypatch, session)
+    try:
+        response = client.get("/rules")
+
+        assert response.status_code == 200
+        assert '<span class="status-text status-success">启用</span>' in response.text
+        assert '<span class="status-text status-muted">停用</span>' in response.text
+        assert 'class="button button-danger"' in response.text
+    finally:
+        app.dependency_overrides.clear()
+        get_settings.cache_clear()
+
+
+def test_rule_form_keeps_sql_behaviors_inside_workbench_sections(monkeypatch, session):
+    _create_data_source(session)
+    client, get_settings, _ = _client_with_admin(monkeypatch, session)
+    try:
+        response = client.get("/rules/new")
+
+        assert response.status_code == 200
+        assert 'class="form-section sql-workspace"' in response.text
+        assert "data-sql-check-button" in response.text
+        assert "data-sql-preview-button" in response.text
+    finally:
         get_settings.cache_clear()
 
 
@@ -1791,6 +1849,35 @@ def test_settings_page_lists_data_sources_and_smtp_configs(monkeypatch, session)
         get_settings.cache_clear()
 
 
+def test_settings_page_uses_semantic_status_classes(monkeypatch, session):
+    _create_data_source(session)
+    session.add(
+        SqlDataSource(
+            name="停用库",
+            host="disabled-db.example.com",
+            port=1433,
+            database="archive",
+            username="readonly",
+            encrypted_password="encrypted",
+            enabled=False,
+        )
+    )
+    _create_smtp_config(session, enabled=True)
+    _create_smtp_config(session, enabled=False)
+    session.commit()
+    client, get_settings, app = _client_with_admin(monkeypatch, session)
+    try:
+        response = client.get("/settings")
+
+        assert response.status_code == 200
+        assert response.text.count('<span class="status-text status-success">启用</span>') >= 2
+        assert response.text.count('<span class="status-text status-muted">停用</span>') >= 2
+        assert response.text.count('class="button button-danger"') >= 2
+    finally:
+        app.dependency_overrides.clear()
+        get_settings.cache_clear()
+
+
 def test_settings_page_includes_sql_server_delete_action(monkeypatch, session):
     data_source = _create_data_source(session)
     client, get_settings, app = _client_with_admin(monkeypatch, session)
@@ -2313,6 +2400,7 @@ def test_logs_page_lists_execution_and_mail_logs(monkeypatch, session):
         response = client.get("/logs")
 
         assert response.status_code == 200
+        assert response.text.count('class="panel table-panel"') >= 2
         assert "/logs/executions.csv" in response.text
         assert "/logs/mails.csv" in response.text
         assert "导出执行日志" in response.text
@@ -2325,6 +2413,76 @@ def test_logs_page_lists_execution_and_mail_logs(monkeypatch, session):
         assert "大额订单预警" in response.text
         assert "ops@example.com" in response.text
         assert "manual" in response.text
+    finally:
+        app.dependency_overrides.clear()
+        get_settings.cache_clear()
+
+
+def test_table_panel_section_headings_align_with_table_content():
+    stylesheet = Path("app/static/styles.css").read_text(encoding="utf-8")
+
+    assert ".table-panel > .section-heading {\n  padding: 18px 18px 0;\n}" in stylesheet
+
+
+def test_danger_button_and_status_variants_have_semantic_styles():
+    stylesheet = Path("app/static/styles.css").read_text(encoding="utf-8")
+
+    assert "--danger-hover: #912018;" in stylesheet
+    assert ".button-danger {\n  background: var(--danger);\n}" in stylesheet
+    assert ".button-danger:hover {\n  background: var(--danger-hover);\n}" in stylesheet
+    assert ".status-success {\n  color: var(--success);\n}" in stylesheet
+    assert ".status-warning {\n  color: var(--warning);\n}" in stylesheet
+    assert ".status-danger {\n  color: var(--danger);\n}" in stylesheet
+    assert ".status-muted {\n  color: var(--muted);\n}" in stylesheet
+
+
+def test_two_column_children_can_shrink_below_intrinsic_content_width():
+    stylesheet = Path("app/static/styles.css").read_text(encoding="utf-8")
+
+    assert ".two-column > * {\n  min-width: 0;\n}" in stylesheet
+
+
+def test_logs_page_uses_semantic_status_classes(monkeypatch, session):
+    data_source = _create_data_source(session)
+    rule = _create_rule(session, data_source)
+    success_log = ExecutionLog(
+        rule_id=rule.id,
+        trigger_type=TriggerType.MANUAL,
+        status=ExecutionStatus.SUCCESS,
+    )
+    running_log = ExecutionLog(
+        rule_id=rule.id,
+        trigger_type=TriggerType.MANUAL,
+        status=ExecutionStatus.RUNNING,
+    )
+    partial_failure_log = ExecutionLog(
+        rule_id=rule.id,
+        trigger_type=TriggerType.MANUAL,
+        status=ExecutionStatus.PARTIAL_FAILED,
+    )
+    session.add(success_log)
+    session.add(running_log)
+    session.add(partial_failure_log)
+    session.commit()
+    session.refresh(success_log)
+    session.add(
+        MailLog(
+            execution_log_id=success_log.id,
+            recipients="ops@example.com",
+            subject="发送失败",
+            status=MailStatus.FAILED,
+        )
+    )
+    session.commit()
+    client, get_settings, app = _client_with_admin(monkeypatch, session)
+    try:
+        response = client.get("/logs")
+
+        assert response.status_code == 200
+        assert '<span class="status-text status-success">success</span>' in response.text
+        assert '<span class="status-text status-warning">running</span>' in response.text
+        assert '<span class="status-text status-danger">partial_failed</span>' in response.text
+        assert '<span class="status-text status-danger">failed</span>' in response.text
     finally:
         app.dependency_overrides.clear()
         get_settings.cache_clear()

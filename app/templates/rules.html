@@ -3,11 +3,11 @@
 
 {% block content %}
 <section class="page-header">
-  <div>
+  <div class="page-heading">
     <p class="eyebrow">预警</p>
     <h1>规则</h1>
   </div>
-  <div class="button-row">
+  <div class="page-actions">
     <a class="button button-secondary" href="/rules/export.json">导出规则</a>
     <form class="import-form" method="post" action="/rules/import" enctype="multipart/form-data">
       {{ csrf_input(csrf_token) }}
@@ -26,7 +26,7 @@
 <p class="form-success">{{ notice }}</p>
 {% endif %}
 
-<section class="panel">
+<section class="panel table-panel">
   <div class="table-shell">
     <table>
       <thead>
@@ -45,7 +45,7 @@
         <tr>
           <td>{{ rule.name }}</td>
           <td>{{ rule.cron_expression }}</td>
-          <td>{{ "启用" if rule.enabled else "停用" }}</td>
+          <td><span class="status-text {% if rule.enabled %}status-success{% else %}status-muted{% endif %}">{{ "启用" if rule.enabled else "停用" }}</span></td>
           <td>{{ "汇总一封" if rule.send_mode == "summary" else "每行一封" }}</td>
           <td>{{ rule.dynamic_recipient_field if rule.dynamic_recipient_field else "未启用" }}</td>
           <td>
@@ -66,7 +66,7 @@
               </form>
               <form class="inline-form" method="post" action="/rules/{{ rule.id }}/delete" onsubmit="return confirm('确认删除该规则吗？')">
                 {{ csrf_input(csrf_token) }}
-                <button class="button button-secondary" type="submit">删除</button>
+                <button class="button button-danger" type="submit">删除</button>
               </form>
             </div>
           </td>

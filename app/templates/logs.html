@@ -2,18 +2,18 @@
 
 {% block content %}
 <section class="page-header">
-  <div>
+  <div class="page-heading">
     <p class="eyebrow">审计</p>
     <h1>日志</h1>
   </div>
-  <div class="button-row">
+  <div class="page-actions">
     <a class="button button-secondary" href="/logs/executions.csv">导出执行日志</a>
     <a class="button button-secondary" href="/logs/mails.csv">导出邮件日志</a>
   </div>
 </section>
 
-<section class="panel">
-  <h2>筛选</h2>
+<section class="panel toolbar-panel">
+  <h2 class="section-heading">筛选</h2>
   <form class="filter-form" method="get" action="/logs">
     <label>
       <span>执行状态</span>
@@ -57,8 +57,8 @@
   </form>
 </section>
 
-<section class="panel">
-  <h2>执行日志</h2>
+<section class="panel table-panel">
+  <h2 class="section-heading">执行日志</h2>
   <div class="table-shell">
     <table>
       <thead>
@@ -78,7 +78,7 @@
           <td>{{ log.started_at }}</td>
           <td>{{ log.rule_id }}</td>
           <td>{{ log.trigger_type }}</td>
-          <td>{{ log.status }}</td>
+          <td><span class="status-text {% if log.status.value == 'success' %}status-success{% elif log.status.value == 'running' %}status-warning{% else %}status-danger{% endif %}">{{ log.status }}</span></td>
           <td>{{ log.row_count }}</td>
           <td>{{ log.email_count }}</td>
           <td>{{ log.error_message }}</td>
@@ -93,8 +93,8 @@
   </div>
 </section>
 
-<section class="panel">
-  <h2>邮件日志</h2>
+<section class="panel table-panel">
+  <h2 class="section-heading">邮件日志</h2>
   <div class="table-shell">
     <table>
       <thead>
@@ -114,7 +114,7 @@
           <td>{{ log.execution_log_id }}</td>
           <td>{{ log.recipients }}</td>
           <td>{{ log.subject }}</td>
-          <td>{{ log.status }}</td>
+          <td><span class="status-text {% if log.status.value == 'success' %}status-success{% elif log.status.value == 'running' %}status-warning{% else %}status-danger{% endif %}">{{ log.status }}</span></td>
           <td>{{ log.error_message }}</td>
         </tr>
         {% else %}
