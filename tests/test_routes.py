@@ -2378,6 +2378,12 @@ def test_table_panel_section_headings_align_with_table_content():
     assert ".table-panel > .section-heading {\n  padding: 18px 18px 0;\n}" in stylesheet
 
 
+def test_two_column_children_can_shrink_below_intrinsic_content_width():
+    stylesheet = Path("app/static/styles.css").read_text(encoding="utf-8")
+
+    assert ".two-column > * {\n  min-width: 0;\n}" in stylesheet
+
+
 def test_logs_page_filters_execution_logs_by_status_trigger_and_rule(monkeypatch, session):
     data_source = _create_data_source(session)
     matching_rule = _create_rule(session, data_source, name="匹配规则")
