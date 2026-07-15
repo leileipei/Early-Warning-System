@@ -2,18 +2,18 @@
 
 {% block content %}
 <section class="page-header">
-  <div>
+  <div class="page-heading">
     <p class="eyebrow">规则</p>
     <h1>版本历史</h1>
   </div>
-  <div class="button-row">
+  <div class="page-actions">
     <a class="button button-secondary" href="/rules/{{ rule.id }}/edit">编辑规则</a>
     <a class="button button-secondary" href="/rules">返回</a>
   </div>
 </section>
 
-<section class="panel">
-  <h2>{{ rule.name }}</h2>
+<section class="panel table-panel">
+  <h2 class="section-heading">{{ rule.name }}</h2>
   <div class="table-shell">
     <table>
       <thead>

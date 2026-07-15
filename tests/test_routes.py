@@ -672,6 +672,21 @@ def test_rules_page_lists_existing_rules(monkeypatch, session):
         get_settings.cache_clear()
 
 
+def test_rules_page_uses_workbench_list_regions(monkeypatch, session):
+    data_source = _create_data_source(session)
+    _create_rule(session, data_source)
+    client, get_settings, _ = _client_with_admin(monkeypatch, session)
+    try:
+        response = client.get("/rules")
+
+        assert response.status_code == 200
+        assert 'class="page-heading"' in response.text
+        assert 'class="panel table-panel"' in response.text
+        assert 'action="/rules/1/run"' in response.text
+    finally:
+        get_settings.cache_clear()
+
+
 def test_archive_rule_marks_it_inactive_and_preserves_related_records(monkeypatch, session):
     data_source = _create_data_source(session)
     rule = _create_rule(session, data_source)

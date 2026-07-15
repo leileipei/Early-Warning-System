@@ -157,10 +157,12 @@ button:focus-visible {
 }
 
 .metric-card strong {
-  font-size: 30px;
+  font-size: 32px;
+  line-height: 1.15;
 }
 
 .metric-label,
+.status-text,
 .empty-state,
 .empty-cell {
   color: var(--muted);
@@ -377,6 +379,20 @@ button:hover {
   overflow-x: auto;
 }
 
+.toolbar-panel {
+  margin-bottom: 16px;
+  padding: 16px 18px;
+}
+
+.table-panel {
+  padding: 0;
+  overflow: hidden;
+}
+
+.table-panel .table-shell {
+  padding: 0 18px;
+}
+
 table {
   width: 100%;
   border-collapse: collapse;
@@ -391,9 +407,15 @@ td {
 }
 
 th {
-  color: #344054;
-  font-size: 13px;
+  background: var(--surface-muted);
+  color: var(--muted);
+  font-size: 12px;
   font-weight: 700;
+  letter-spacing: 0;
+}
+
+tbody tr:hover {
+  background: #f8fbff;
 }
 
 .empty-cell {
