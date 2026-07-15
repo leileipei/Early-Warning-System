@@ -109,7 +109,7 @@
             <td>{{ data_source.name }}</td>
             <td>{{ data_source.host }}:{{ data_source.port }}</td>
             <td>{{ data_source.database }}</td>
-            <td>{{ "启用" if data_source.enabled else "停用" }}</td>
+            <td><span class="status-text {% if data_source.enabled %}status-success{% else %}status-muted{% endif %}">{{ "启用" if data_source.enabled else "停用" }}</span></td>
             <td>
               <div class="table-actions">
                 <form class="inline-form" method="post" action="/settings/sql-server/{{ data_source.id }}/test">
@@ -202,7 +202,7 @@
             <td>
               {% if smtp_config.use_ssl %}SSL{% elif smtp_config.use_tls %}TLS{% else %}无{% endif %}
             </td>
-            <td>{{ "启用" if smtp_config.enabled else "停用" }}</td>
+            <td><span class="status-text {% if smtp_config.enabled %}status-success{% else %}status-muted{% endif %}">{{ "启用" if smtp_config.enabled else "停用" }}</span></td>
             <td>
               <div class="table-actions">
                 <form class="inline-form" method="post" action="/settings/smtp/{{ smtp_config.id }}/test">

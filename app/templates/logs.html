@@ -78,7 +78,7 @@
           <td>{{ log.started_at }}</td>
           <td>{{ log.rule_id }}</td>
           <td>{{ log.trigger_type }}</td>
-          <td><span class="status-text">{{ log.status }}</span></td>
+          <td><span class="status-text {% if log.status.value == 'success' %}status-success{% elif log.status.value == 'running' %}status-warning{% else %}status-danger{% endif %}">{{ log.status }}</span></td>
           <td>{{ log.row_count }}</td>
           <td>{{ log.email_count }}</td>
           <td>{{ log.error_message }}</td>
@@ -114,7 +114,7 @@
           <td>{{ log.execution_log_id }}</td>
           <td>{{ log.recipients }}</td>
           <td>{{ log.subject }}</td>
-          <td><span class="status-text">{{ log.status }}</span></td>
+          <td><span class="status-text {% if log.status.value == 'success' %}status-success{% elif log.status.value == 'running' %}status-warning{% else %}status-danger{% endif %}">{{ log.status }}</span></td>
           <td>{{ log.error_message }}</td>
         </tr>
         {% else %}

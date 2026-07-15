@@ -13,6 +13,7 @@
   --success: #067647;
   --warning: #b54708;
   --danger: #b42318;
+  --danger-hover: #912018;
 }
 
 * {
@@ -168,6 +169,22 @@ button:focus-visible {
   color: var(--muted);
 }
 
+.status-success {
+  color: var(--success);
+}
+
+.status-warning {
+  color: var(--warning);
+}
+
+.status-danger {
+  color: var(--danger);
+}
+
+.status-muted {
+  color: var(--muted);
+}
+
 .two-column {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -274,6 +291,14 @@ button:hover {
 
 .button-secondary:hover {
   background: var(--secondary-hover);
+}
+
+.button-danger {
+  background: var(--danger);
+}
+
+.button-danger:hover {
+  background: var(--danger-hover);
 }
 
 .button-row {

@@ -45,7 +45,7 @@
         <tr>
           <td>{{ rule.name }}</td>
           <td>{{ rule.cron_expression }}</td>
-          <td><span class="status-text">{{ "启用" if rule.enabled else "停用" }}</span></td>
+          <td><span class="status-text {% if rule.enabled %}status-success{% else %}status-muted{% endif %}">{{ "启用" if rule.enabled else "停用" }}</span></td>
           <td>{{ "汇总一封" if rule.send_mode == "summary" else "每行一封" }}</td>
           <td>{{ rule.dynamic_recipient_field if rule.dynamic_recipient_field else "未启用" }}</td>
           <td>
