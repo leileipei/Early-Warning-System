@@ -20,69 +20,77 @@
   <article class="panel">
     <h2>SQL Server</h2>
     <form class="stacked-form" method="post" action="/settings/sql-server">
-      {{ csrf_input(csrf_token) }}
-      <label>
-        <span>名称</span>
-        <input name="name" required>
-      </label>
-      <label>
-        <span>主机</span>
-        <input name="host" required>
-      </label>
-      <label>
-        <span>端口</span>
-        <input name="port" type="number" value="1433" required>
-      </label>
-      <label>
-        <span>数据库</span>
-        <input name="database" required>
-      </label>
-      <label>
-        <span>用户名</span>
-        <input name="username" required>
-      </label>
-      <label>
-        <span>密码</span>
-        <input name="password" type="password" required>
-      </label>
-      <label>
-        <span>连接超时（秒）</span>
-        <input name="connect_timeout_seconds" type="number" value="10" min="1">
-      </label>
-      <label>
-        <span>ODBC 驱动</span>
-        <input name="odbc_driver" value="ODBC Driver 18 for SQL Server" required>
-      </label>
-      <label>
-        <span>服务器地址覆盖值</span>
-        <input name="server_override" placeholder="可选，例如 SERVER\INSTANCE 或 192.168.1.10,1433">
-      </label>
-      <div class="form-row">
+      <section class="form-section">
+        {{ csrf_input(csrf_token) }}
         <label>
-          <span>Encrypt</span>
-          <select name="encrypt">
-            <option value="yes" selected>yes</option>
-            <option value="no">no</option>
-            <option value="optional">optional</option>
-          </select>
+          <span>名称</span>
+          <input name="name" required>
         </label>
         <label>
-          <span>TrustServerCertificate</span>
-          <select name="trust_server_certificate">
-            <option value="yes" selected>yes</option>
-            <option value="no">no</option>
-          </select>
+          <span>主机</span>
+          <input name="host" required>
         </label>
+        <label>
+          <span>端口</span>
+          <input name="port" type="number" value="1433" required>
+        </label>
+        <label>
+          <span>数据库</span>
+          <input name="database" required>
+        </label>
+      </section>
+      <section class="form-section">
+        <label>
+          <span>用户名</span>
+          <input name="username" required>
+        </label>
+        <label>
+          <span>密码</span>
+          <input name="password" type="password" required>
+        </label>
+      </section>
+      <section class="form-section">
+        <label>
+          <span>连接超时（秒）</span>
+          <input name="connect_timeout_seconds" type="number" value="10" min="1">
+        </label>
+        <label>
+          <span>ODBC 驱动</span>
+          <input name="odbc_driver" value="ODBC Driver 18 for SQL Server" required>
+        </label>
+        <label>
+          <span>服务器地址覆盖值</span>
+          <input name="server_override" placeholder="可选，例如 SERVER\INSTANCE 或 192.168.1.10,1433">
+        </label>
+        <div class="form-row">
+          <label>
+            <span>Encrypt</span>
+            <select name="encrypt">
+              <option value="yes" selected>yes</option>
+              <option value="no">no</option>
+              <option value="optional">optional</option>
+            </select>
+          </label>
+          <label>
+            <span>TrustServerCertificate</span>
+            <select name="trust_server_certificate">
+              <option value="yes" selected>yes</option>
+              <option value="no">no</option>
+            </select>
+          </label>
+        </div>
+        <label>
+          <span>额外连接参数</span>
+          <input name="extra_params" placeholder="例如 ApplicationIntent=ReadOnly;MultiSubnetFailover=Yes;">
+        </label>
+        <label>
+          <span>启用</span>
+          <input name="enabled" type="checkbox" checked>
+        </label>
+      </section>
+      <div class="button-row form-actions">
+        <button class="button" type="submit">保存数据源</button>
       </div>
-      <label>
-        <span>额外连接参数</span>
-        <input name="extra_params" placeholder="例如 ApplicationIntent=ReadOnly;MultiSubnetFailover=Yes;">
-      </label>
-      <label>
-        <span>启用</span>
-        <input name="enabled" type="checkbox" checked>
-      </label>
-      <button class="button" type="submit">保存数据源</button>
     </form>
     <div class="table-shell">
       <table>
@@ -128,44 +136,52 @@
   <article class="panel">
     <h2>SMTP</h2>
     <form class="stacked-form" method="post" action="/settings/smtp">
-      {{ csrf_input(csrf_token) }}
-      <label>
-        <span>服务器</span>
-        <input name="host" required>
-      </label>
-      <label>
-        <span>端口</span>
-        <input name="port" type="number" value="587" required>
-      </label>
-      <label>
-        <span>用户名</span>
-        <input name="username" required>
-      </label>
-      <label>
-        <span>密码</span>
-        <input name="password" type="password" required>
-      </label>
-      <label>
-        <span>发件人</span>
-        <input name="sender" required>
-      </label>
-      <label>
-        <span>超时（秒）</span>
-        <input name="timeout_seconds" type="number" value="10" min="1">
-      </label>
-      <label>
-        <span>TLS</span>
-        <input name="use_tls" type="checkbox" checked>
-      </label>
-      <label>
-        <span>SSL</span>
-        <input name="use_ssl" type="checkbox">
-      </label>
-      <label>
-        <span>启用</span>
-        <input name="enabled" type="checkbox" checked>
-      </label>
-      <button class="button" type="submit">保存邮件配置</button>
+      <section class="form-section">
+        {{ csrf_input(csrf_token) }}
+        <label>
+          <span>服务器</span>
+          <input name="host" required>
+        </label>
+        <label>
+          <span>端口</span>
+          <input name="port" type="number" value="587" required>
+        </label>
+      </section>
+      <section class="form-section">
+        <label>
+          <span>用户名</span>
+          <input name="username" required>
+        </label>
+        <label>
+          <span>密码</span>
+          <input name="password" type="password" required>
+        </label>
+        <label>
+          <span>发件人</span>
+          <input name="sender" required>
+        </label>
+        <label>
+          <span>超时（秒）</span>
+          <input name="timeout_seconds" type="number" value="10" min="1">
+        </label>
+      </section>
+      <section class="form-section">
+        <label>
+          <span>TLS</span>
+          <input name="use_tls" type="checkbox" checked>
+        </label>
+        <label>
+          <span>SSL</span>
+          <input name="use_ssl" type="checkbox">
+        </label>
+        <label>
+          <span>启用</span>
+          <input name="enabled" type="checkbox" checked>
+        </label>
+      </section>
+      <div class="button-row form-actions">
+        <button class="button" type="submit">保存邮件配置</button>
+      </div>
     </form>
     <div class="table-shell">
       <table>

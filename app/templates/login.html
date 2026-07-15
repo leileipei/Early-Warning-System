@@ -2,19 +2,21 @@
 {% from "_csrf.html" import csrf_input %}
 
 {% block content %}
-<section class="auth-panel panel">
-  <h1>管理员登录</h1>
-  <form class="stacked-form" method="post" action="/login">
-    {{ csrf_input(csrf_token) }}
-    <label>
-      <span>用户名</span>
-      <input name="username" autocomplete="username" required>
-    </label>
-    <label>
-      <span>密码</span>
-      <input name="password" type="password" autocomplete="current-password" required>
-    </label>
-    <button class="button" type="submit">登录</button>
-  </form>
+<section class="auth-shell">
+  <section class="auth-panel panel">
+    <h1>管理员登录</h1>
+    <form class="stacked-form" method="post" action="/login">
+      {{ csrf_input(csrf_token) }}
+      <label>
+        <span>用户名</span>
+        <input name="username" autocomplete="username" required>
+      </label>
+      <label>
+        <span>密码</span>
+        <input name="password" type="password" autocomplete="current-password" required>
+      </label>
+      <button class="button" type="submit">登录</button>
+    </form>
+  </section>
 </section>
 {% endblock %}

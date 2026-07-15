@@ -687,6 +687,20 @@ def test_rules_page_uses_workbench_list_regions(monkeypatch, session):
         get_settings.cache_clear()
 
 
+def test_rule_form_keeps_sql_behaviors_inside_workbench_sections(monkeypatch, session):
+    _create_data_source(session)
+    client, get_settings, _ = _client_with_admin(monkeypatch, session)
+    try:
+        response = client.get("/rules/new")
+
+        assert response.status_code == 200
+        assert 'class="form-section sql-workspace"' in response.text
+        assert "data-sql-check-button" in response.text
+        assert "data-sql-preview-button" in response.text
+    finally:
+        get_settings.cache_clear()
+
+
 def test_archive_rule_marks_it_inactive_and_preserves_related_records(monkeypatch, session):
     data_source = _create_data_source(session)
     rule = _create_rule(session, data_source)

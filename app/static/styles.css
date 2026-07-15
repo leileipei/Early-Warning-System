@@ -279,6 +279,41 @@ button:hover {
   align-items: center;
 }
 
+.form-section {
+  display: grid;
+  gap: 14px;
+  padding-top: 18px;
+  border-top: 1px solid var(--border);
+}
+
+.form-section:first-child {
+  padding-top: 0;
+  border-top: 0;
+}
+
+.form-actions {
+  margin-top: 8px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border);
+}
+
+.sql-workspace textarea {
+  min-height: 220px;
+  background: #fbfcfe;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+}
+
+.auth-shell {
+  display: grid;
+  max-width: 420px;
+  margin: 48px auto 0;
+}
+
+.auth-shell .auth-panel {
+  max-width: none;
+  margin: 0;
+}
+
 .filter-form {
   display: grid;
   grid-template-columns: repeat(6, minmax(120px, 1fr));
