@@ -2,7 +2,7 @@ from pathlib import Path
 import tomllib
 
 from packaging.requirements import Requirement
-from packaging.specifiers import SpecifierSet
+from packaging.version import Version
 import pytest
 
 from app.template_renderer import TemplateRenderError, render_per_row, render_summary
@@ -19,7 +19,31 @@ def test_jinja_dependency_requires_patched_release():
         dependency for dependency in dependencies if dependency.name.lower() == "jinja2"
     )
 
-    assert jinja_dependency.specifier == SpecifierSet(">=3.1.6")
+    vulnerable_release = Version("3.1.5")
+    first_patched_release = Version("3.1.6")
+    declared_lower_bounds = [
+        (specifier.operator, Version(specifier.version))
+        for specifier in jinja_dependency.specifier
+        if specifier.operator in {">", ">="}
+    ]
+    has_patched_security_floor = any(
+        version > vulnerable_release
+        or (operator == ">" and version == vulnerable_release)
+        for operator, version in declared_lower_bounds
+    )
+    has_higher_security_floor = any(
+        version > first_patched_release
+        or (operator == ">" and version == first_patched_release)
+        for operator, version in declared_lower_bounds
+    )
+
+    assert vulnerable_release not in jinja_dependency.specifier
+    assert declared_lower_bounds
+    assert has_patched_security_floor
+    assert (
+        first_patched_release in jinja_dependency.specifier
+        or has_higher_security_floor
+    )
 
 
 def test_render_summary_includes_html_table():
@@ -128,16 +152,19 @@ def test_summary_table_uses_columns_from_first_row():
     assert "not rendered" not in message.html_body
 
 
-@pytest.mark.parametrize(
-    "template_text",
-    [
-        "{{ ''.__class__.__mro__ }}",
-        "{{ cycler.__init__.__globals__ }}",
-    ],
-)
-def test_template_renderer_rejects_unsafe_python_access(template_text):
+def test_template_renderer_does_not_expose_default_jinja_globals():
     with pytest.raises(TemplateRenderError):
-        render_per_row("预警", template_text, {"id": 1}, {"rule_name": "测试"})
+        render_per_row("预警", "{{ cycler }}", {"id": 1}, {"rule_name": "测试"})
+
+
+def test_template_renderer_rejects_unsafe_python_access():
+    with pytest.raises(TemplateRenderError):
+        render_per_row(
+            "预警",
+            "{{ ''.__class__.__mro__ }}",
+            {"id": 1},
+            {"rule_name": "测试"},
+        )
 
 
 def test_template_renderer_rejects_attr_filter_format_sandbox_escape():

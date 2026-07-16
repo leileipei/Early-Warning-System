@@ -1,7 +1,7 @@
 import importlib
 import sys
 from concurrent.futures import ThreadPoolExecutor
-from threading import Barrier, BrokenBarrierError
+from threading import Barrier, BrokenBarrierError, Lock
 
 import pytest
 from sqlalchemy import event, inspect, text
@@ -136,9 +136,29 @@ def test_init_db_serializes_concurrent_sqlite_upgrade_missing_only_lease_table(t
     seed_engine.dispose()
 
     engines = [create_db_engine(database_url), create_db_engine(database_url)]
+    start_barrier = Barrier(3)
     create_barrier = Barrier(2)
+    started_calls = set()
+    lease_create_calls = []
+    started_calls_lock = Lock()
+
+    def make_start_listener(call_number):
+        def synchronize_start(_connection):
+            with started_calls_lock:
+                if call_number in started_calls:
+                    return
+                started_calls.add(call_number)
+            start_barrier.wait(timeout=5)
+
+        return synchronize_start
+
+    start_listeners = [make_start_listener(index) for index in range(len(engines))]
+    for engine, listener in zip(engines, start_listeners, strict=True):
+        event.listen(engine, "engine_connect", listener)
 
     def synchronize_lease_creation(_target, _connection, **_kwargs):
+        with started_calls_lock:
+            lease_create_calls.append(1)
         try:
             create_barrier.wait(timeout=1)
         except BrokenBarrierError:
@@ -148,15 +168,19 @@ def test_init_db_serializes_concurrent_sqlite_upgrade_missing_only_lease_table(t
     try:
         with ThreadPoolExecutor(max_workers=2) as pool:
             futures = [pool.submit(init_db, engine) for engine in engines]
+            start_barrier.wait(timeout=5)
+            assert started_calls == {0, 1}
             for future in futures:
                 future.result()
+            assert len(lease_create_calls) == 1
     finally:
         event.remove(
             RuleExecutionLease.__table__,
             "before_create",
             synchronize_lease_creation,
         )
-        for engine in engines:
+        for engine, listener in zip(engines, start_listeners, strict=True):
+            event.remove(engine, "engine_connect", listener)
             engine.dispose()
 
     verification_engine = create_db_engine(database_url)
@@ -164,6 +188,48 @@ def test_init_db_serializes_concurrent_sqlite_upgrade_missing_only_lease_table(t
         assert set(inspect(verification_engine).get_table_names()) == expected_tables
     finally:
         verification_engine.dispose()
+
+
+def test_init_db_rolls_back_partial_sqlite_initialization_after_create_failure(tmp_path):
+    from app.db import create_db_engine, init_db
+
+    database_path = tmp_path / "failed-initialization.sqlite3"
+    database_url = f"sqlite:///{database_path}"
+    engine = create_db_engine(database_url)
+    expected_tables = {table.name for table in SQLModel.metadata.sorted_tables}
+    tables_seen_before_failure = set()
+
+    with engine.begin() as connection:
+        connection.execute(text("CREATE TABLE sqldatasource (id INTEGER PRIMARY KEY)"))
+
+    def fail_before_lease_create(_target, connection, **_kwargs):
+        tables_seen_before_failure.update(inspect(connection).get_table_names())
+        raise RuntimeError("injected schema initialization failure")
+
+    event.listen(RuleExecutionLease.__table__, "before_create", fail_before_lease_create)
+    try:
+        with pytest.raises(RuntimeError, match="injected schema initialization failure"):
+            init_db(engine)
+    finally:
+        event.remove(
+            RuleExecutionLease.__table__,
+            "before_create",
+            fail_before_lease_create,
+        )
+
+    assert {"adminuser", "alertrule"} <= tables_seen_before_failure
+    assert set(inspect(engine).get_table_names()) == {"sqldatasource"}
+    assert {column["name"] for column in inspect(engine).get_columns("sqldatasource")} == {
+        "id"
+    }
+
+    init_db(engine)
+
+    assert set(inspect(engine).get_table_names()) == expected_tables
+    assert "odbc_driver" in {
+        column["name"] for column in inspect(engine).get_columns("sqldatasource")
+    }
+    engine.dispose()
 
 
 def test_init_db_adds_sql_server_connection_option_columns_to_existing_sqlite_table(tmp_path):
