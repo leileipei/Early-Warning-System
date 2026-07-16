@@ -11,6 +11,7 @@ from app.models import (
     AlertSuppression,
     AlertRuleVersion,
     ExecutionLog,
+    RuleExecutionLease,
     SendMode,
     SqlDataSource,
     TriggerType,
@@ -82,6 +83,36 @@ def test_init_db_creates_model_tables(engine):
         "executionlog",
         "maillog",
     } <= table_names
+
+
+def test_init_db_creates_rule_execution_lease_table(engine):
+    assert "ruleexecutionlease" in inspect(engine).get_table_names()
+
+
+def test_rule_execution_lease_uses_rule_as_primary_key(session):
+    rule = _create_rule(session)
+    lease = RuleExecutionLease(
+        rule_id=rule.id,
+        owner_token="owner-a",
+        expires_at=utc_now(),
+    )
+    session.add(lease)
+    session.commit()
+
+    assert session.get(RuleExecutionLease, rule.id).owner_token == "owner-a"
+
+
+def test_init_db_adds_rule_execution_lease_table_to_existing_database(tmp_path):
+    from app.db import create_db_engine, init_db
+
+    database_path = tmp_path / "legacy.sqlite3"
+    legacy_engine = create_db_engine(f"sqlite:///{database_path}")
+    with legacy_engine.begin() as connection:
+        connection.execute(text("CREATE TABLE legacy_marker (id INTEGER PRIMARY KEY)"))
+
+    init_db(legacy_engine)
+
+    assert "ruleexecutionlease" in inspect(legacy_engine).get_table_names()
 
 
 def test_init_db_adds_sql_server_connection_option_columns_to_existing_sqlite_table(tmp_path):

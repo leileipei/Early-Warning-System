@@ -96,6 +96,13 @@ class AlertRule(SQLModel, table=True):
     updated_at: datetime = Field(default_factory=utc_now)
 
 
+class RuleExecutionLease(SQLModel, table=True):
+    rule_id: int = Field(foreign_key="alertrule.id", primary_key=True)
+    owner_token: str
+    acquired_at: datetime = Field(default_factory=utc_now)
+    expires_at: datetime
+
+
 class AlertSuppression(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
     rule_id: int = Field(foreign_key="alertrule.id", index=True)

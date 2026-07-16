@@ -24,6 +24,7 @@ from app.models import (
     TriggerType,
 )
 from app.mailer import MailSendResult
+from app.settings import Settings
 from app.sql_client import QueryResult
 from app.web_security import require_csrf
 
@@ -247,6 +248,22 @@ def test_scheduler_sync_interval_defaults_to_ten_seconds():
     )
 
     assert settings.scheduler_sync_interval_seconds == 10.0
+
+
+def test_rule_execution_lease_defaults_to_two_hours():
+    settings = Settings(session_secret="valid-session-secret", secret_key=VALID_FERNET_KEY)
+
+    assert settings.rule_execution_lease_seconds == 7200
+
+
+@pytest.mark.parametrize("value", [0, -1])
+def test_rule_execution_lease_rejects_non_positive_values(value):
+    with pytest.raises(ValidationError):
+        Settings(
+            session_secret="valid-session-secret",
+            secret_key=VALID_FERNET_KEY,
+            rule_execution_lease_seconds=value,
+        )
 
 
 def test_web_security_settings_have_safe_compatible_defaults():
