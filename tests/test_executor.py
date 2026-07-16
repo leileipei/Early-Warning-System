@@ -78,6 +78,57 @@ class FakeMailer:
         return MailSendResult(success=True)
 
 
+class FakeCipher:
+    def __init__(self, plaintext):
+        self.plaintext = plaintext
+
+    def decrypt(self, encrypted_value):
+        return self.plaintext
+
+
+class RecordingSmtpClient:
+    def __init__(self):
+        self.starttls_context = None
+
+    def starttls(self, *, context):
+        self.starttls_context = context
+
+    def login(self, username, password):
+        return None
+
+
+@pytest.mark.parametrize("use_ssl", [False, True])
+def test_build_smtp_mailer_uses_verified_tls_context(monkeypatch, use_ssl):
+    from ssl import CERT_REQUIRED
+
+    captured = {}
+    client = RecordingSmtpClient()
+
+    def fake_smtp(*args, **kwargs):
+        captured.update(kwargs)
+        return client
+
+    monkeypatch.setattr(execution_service.smtplib, "SMTP", fake_smtp)
+    monkeypatch.setattr(execution_service.smtplib, "SMTP_SSL", fake_smtp)
+    monkeypatch.setattr(execution_service, "_cipher", lambda: FakeCipher("secret"))
+    config = SmtpConfig(
+        host="smtp.example.com",
+        port=465 if use_ssl else 587,
+        username="mailer",
+        encrypted_password="encrypted",
+        sender="alerts@example.com",
+        use_ssl=use_ssl,
+        use_tls=not use_ssl,
+    )
+
+    mailer = execution_service.build_smtp_mailer(config)
+    mailer.client_factory()
+
+    context = captured["context"] if use_ssl else client.starttls_context
+    assert context.verify_mode == CERT_REQUIRED
+    assert context.check_hostname is True
+
+
 def make_rule(send_mode=SendMode.SUMMARY, **overrides):
     data = {
         "id": 1,

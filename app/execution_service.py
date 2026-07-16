@@ -1,4 +1,5 @@
 import smtplib
+import ssl
 import time
 from dataclasses import replace
 from datetime import datetime, timedelta
@@ -50,14 +51,20 @@ def build_sql_client(data_source: SqlDataSource) -> PyodbcSqlServerClient:
 
 def build_smtp_mailer(config: SmtpConfig) -> SmtpMailer:
     password = _cipher().decrypt(config.encrypted_password)
+    tls_context = ssl.create_default_context()
 
     def client_factory():
         if config.use_ssl:
-            client = smtplib.SMTP_SSL(config.host, config.port, timeout=config.timeout_seconds)
+            client = smtplib.SMTP_SSL(
+                config.host,
+                config.port,
+                timeout=config.timeout_seconds,
+                context=tls_context,
+            )
         else:
             client = smtplib.SMTP(config.host, config.port, timeout=config.timeout_seconds)
             if config.use_tls:
-                client.starttls()
+                client.starttls(context=tls_context)
 
         client.login(config.username, password)
         return client
