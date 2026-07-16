@@ -1,6 +1,25 @@
+from pathlib import Path
+import tomllib
+
+from packaging.requirements import Requirement
+from packaging.specifiers import SpecifierSet
 import pytest
 
 from app.template_renderer import TemplateRenderError, render_per_row, render_summary
+
+
+def test_jinja_dependency_requires_patched_release():
+    pyproject = tomllib.loads(
+        (Path(__file__).parents[1] / "pyproject.toml").read_text(encoding="utf-8")
+    )
+    dependencies = [
+        Requirement(dependency) for dependency in pyproject["project"]["dependencies"]
+    ]
+    jinja_dependency = next(
+        dependency for dependency in dependencies if dependency.name.lower() == "jinja2"
+    )
+
+    assert jinja_dependency.specifier == SpecifierSet(">=3.1.6")
 
 
 def test_render_summary_includes_html_table():
@@ -117,6 +136,15 @@ def test_summary_table_uses_columns_from_first_row():
     ],
 )
 def test_template_renderer_rejects_unsafe_python_access(template_text):
+    with pytest.raises(TemplateRenderError):
+        render_per_row("预警", template_text, {"id": 1}, {"rule_name": "测试"})
+
+
+def test_template_renderer_rejects_attr_filter_format_sandbox_escape():
+    template_text = (
+        '{{ "{0.__call__.__builtins__[__import__]}" | attr("format")(not_here) }}'
+    )
+
     with pytest.raises(TemplateRenderError):
         render_per_row("预警", template_text, {"id": 1}, {"rule_name": "测试"})
 
