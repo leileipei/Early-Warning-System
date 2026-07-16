@@ -1,7 +1,9 @@
+from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
+from threading import Barrier, Event, Lock
 from types import SimpleNamespace
 
 import pytest
-from sqlmodel import select
+from sqlmodel import Session, select
 
 import app.execution_service as execution_service
 from app.execution_lock import RuleExecutionInProgressError, rule_execution_lease
@@ -590,6 +592,79 @@ def test_execute_rule_by_id_rejects_existing_execution_lease_without_building_cl
             execution_service.execute_rule_by_id(session, rule.id, retry_delay_seconds=0)
 
     assert session.exec(select(ExecutionLog)).all() == []
+
+
+def test_execute_rule_by_id_allows_only_one_cross_connection_execution(
+    monkeypatch,
+    tmp_path,
+    request,
+):
+    from app.db import create_db_engine, init_db
+    from app.sql_client import QueryResult
+
+    engine = create_db_engine(f"sqlite:///{tmp_path / 'concurrent-execution.sqlite3'}")
+    request.addfinalizer(engine.dispose)
+    init_db(engine)
+    with Session(engine) as setup_session:
+        data_source = persist_data_source(setup_session)
+        persist_smtp_config(setup_session)
+        rule = persist_rule(setup_session, data_source)
+        rule_id = rule.id
+
+    start_barrier = Barrier(2)
+    query_entered = Event()
+    release_query = Event()
+    query_calls = []
+    connection_ids = set()
+    query_lock = Lock()
+
+    class BlockingSqlClient:
+        def query(self, sql, timeout_seconds, max_rows):
+            with query_lock:
+                query_calls.append(sql)
+            query_entered.set()
+            release_query.wait(timeout=5)
+            return QueryResult(rows=[])
+
+    sql_client = BlockingSqlClient()
+    monkeypatch.setattr(execution_service, "build_sql_client", lambda source: sql_client)
+    monkeypatch.setattr(execution_service, "build_smtp_mailer", lambda config: FakeMailer())
+
+    def execute_from_independent_session():
+        with Session(engine) as worker_session:
+            with query_lock:
+                dbapi_connection = worker_session.connection().connection.driver_connection
+                connection_ids.add(id(dbapi_connection))
+            start_barrier.wait(timeout=5)
+            try:
+                execution_service.execute_rule_by_id(
+                    worker_session,
+                    rule_id,
+                    max_attempts=1,
+                    retry_delay_seconds=0,
+                )
+            except RuleExecutionInProgressError:
+                return "conflict"
+            return "executed"
+
+    try:
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            futures = [pool.submit(execute_from_independent_session) for _ in range(2)]
+            assert query_entered.wait(timeout=5)
+            completed, _pending = wait(futures, timeout=5, return_when=FIRST_COMPLETED)
+            assert len(completed) == 1
+            assert completed.pop().result() == "conflict"
+            release_query.set()
+            outcomes = [future.result(timeout=5) for future in futures]
+    finally:
+        release_query.set()
+
+    assert sorted(outcomes) == ["conflict", "executed"]
+    assert len(connection_ids) == 2
+    assert query_calls == ["select id, amount from orders"]
+    with Session(engine) as verification_session:
+        execution_logs = verification_session.exec(select(ExecutionLog)).all()
+        assert len(execution_logs) == 1
 
 
 def test_execute_rule_by_id_releases_lease_after_result_is_persisted(monkeypatch, session):
