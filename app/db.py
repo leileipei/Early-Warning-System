@@ -1,8 +1,7 @@
 from collections.abc import Generator
 
-from sqlalchemy import event
-from sqlalchemy.engine import Engine
-from sqlalchemy import inspect, text
+from sqlalchemy import event, inspect, text
+from sqlalchemy.engine import Connection, Engine
 from sqlalchemy.pool import StaticPool
 from sqlmodel import Session, SQLModel, create_engine
 
@@ -14,7 +13,9 @@ _schema_initialized = False
 
 def create_db_engine(database_url: str | None = None) -> Engine:
     url = database_url or get_settings().database_url
-    connect_args = {"check_same_thread": False} if url.startswith("sqlite") else {}
+    connect_args = (
+        {"check_same_thread": False, "timeout": 30} if url.startswith("sqlite") else {}
+    )
     engine_args = {"poolclass": StaticPool} if url in {"sqlite://", "sqlite:///:memory:"} else {}
     engine = create_engine(url, connect_args=connect_args, **engine_args)
 
@@ -42,8 +43,19 @@ def init_db(engine: Engine | None = None) -> None:
     import app.models  # noqa: F401
 
     target_engine = engine if engine is not None else get_engine()
+    if target_engine.dialect.name == "sqlite":
+        with target_engine.connect() as connection:
+            connection.exec_driver_sql("BEGIN IMMEDIATE")
+            try:
+                SQLModel.metadata.create_all(connection)
+                migrate_sqlite_schema(connection)
+            except Exception:
+                connection.rollback()
+                raise
+            connection.commit()
+        return
+
     SQLModel.metadata.create_all(target_engine)
-    migrate_sqlite_schema(target_engine)
 
 
 def ensure_schema_initialized() -> None:
@@ -55,11 +67,20 @@ def ensure_schema_initialized() -> None:
     _schema_initialized = True
 
 
-def migrate_sqlite_schema(engine: Engine) -> None:
-    if engine.dialect.name != "sqlite":
+def migrate_sqlite_schema(bind: Engine | Connection) -> None:
+    if bind.dialect.name != "sqlite":
         return
 
-    inspector = inspect(engine)
+    if isinstance(bind, Engine):
+        with bind.begin() as connection:
+            _migrate_sqlite_schema(connection)
+        return
+
+    _migrate_sqlite_schema(bind)
+
+
+def _migrate_sqlite_schema(connection: Connection) -> None:
+    inspector = inspect(connection)
     if "sqldatasource" not in inspector.get_table_names():
         return
 
@@ -71,10 +92,9 @@ def migrate_sqlite_schema(engine: Engine) -> None:
         "trust_server_certificate": "VARCHAR NOT NULL DEFAULT 'yes'",
         "extra_params": "VARCHAR NOT NULL DEFAULT ''",
     }
-    with engine.begin() as connection:
-        for column_name, ddl in columns_to_add.items():
-            if column_name not in existing_columns:
-                connection.execute(text(f"ALTER TABLE sqldatasource ADD COLUMN {column_name} {ddl}"))
+    for column_name, ddl in columns_to_add.items():
+        if column_name not in existing_columns:
+            connection.execute(text(f"ALTER TABLE sqldatasource ADD COLUMN {column_name} {ddl}"))
 
     if "alertrule" not in inspector.get_table_names():
         return
@@ -88,10 +108,9 @@ def migrate_sqlite_schema(engine: Engine) -> None:
         "suppression_window_hours": "INTEGER NOT NULL DEFAULT 24",
         "archived_at": "TIMESTAMP",
     }
-    with engine.begin() as connection:
-        for column_name, ddl in rule_columns_to_add.items():
-            if column_name not in existing_rule_columns:
-                connection.execute(text(f"ALTER TABLE alertrule ADD COLUMN {column_name} {ddl}"))
+    for column_name, ddl in rule_columns_to_add.items():
+        if column_name not in existing_rule_columns:
+            connection.execute(text(f"ALTER TABLE alertrule ADD COLUMN {column_name} {ddl}"))
 
 
 def get_session() -> Generator[Session, None, None]:

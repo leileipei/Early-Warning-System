@@ -172,11 +172,13 @@ cp .env backups/env_$(date +%F_%H%M%S)
 5. 停止 Web。
 6. 拉取最新代码。
 7. 安装或更新依赖。
-8. 启动 Web。
-9. 打开登录页和健康检查。
-10. 启动 Worker。
-11. 手动执行一条测试规则。
-12. 检查日志页面是否有异常。
+8. 在 Web 和 Worker 均保持停止的状态下，由单一进程执行一次 `init_db()`。
+9. 确认 `init_db()` 成功退出且没有数据库错误。
+10. 启动 Web。
+11. 打开登录页并执行健康检查。
+12. 启动 Worker。
+13. 手动执行一条测试规则。
+14. 检查日志页面是否有异常。
 
 命令示例：
 
@@ -184,11 +186,12 @@ cp .env backups/env_$(date +%F_%H%M%S)
 git pull
 source .venv/bin/activate
 pip install -e .
+python3 -c "from app.db import init_db; init_db()"
 uvicorn app.main:create_app --factory --host 0.0.0.0 --port 8000
 python3 -m app.worker
 ```
 
-如果使用 systemd 或 Supervisor，请使用对应服务管理命令替代手工启动。
+只有 `init_db()` 成功后才能重新启动 Web 和 Worker。不要依赖两个服务进程并发启动来完成数据库升级。如果使用 systemd 或 Supervisor，请使用对应服务管理命令替代手工启动，并确保升级期间不会自动拉起服务。
 
 ## 7. 常见故障处理
 

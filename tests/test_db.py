@@ -1,10 +1,12 @@
 import importlib
 import sys
+from concurrent.futures import ThreadPoolExecutor
+from threading import Barrier, BrokenBarrierError
 
 import pytest
-from sqlalchemy import inspect, text
+from sqlalchemy import event, inspect, text
 from sqlalchemy.exc import IntegrityError
-from sqlmodel import Session, select
+from sqlmodel import Session, SQLModel, select
 
 from app.models import (
     AlertRule,
@@ -113,6 +115,55 @@ def test_init_db_adds_rule_execution_lease_table_to_existing_database(tmp_path):
     init_db(legacy_engine)
 
     assert "ruleexecutionlease" in inspect(legacy_engine).get_table_names()
+
+
+def test_init_db_serializes_concurrent_sqlite_upgrade_missing_only_lease_table(tmp_path):
+    from app.db import create_db_engine, init_db
+
+    database_path = tmp_path / "concurrent-legacy.sqlite3"
+    database_url = f"sqlite:///{database_path}"
+    seed_engine = create_db_engine(database_url)
+    expected_tables = {table.name for table in SQLModel.metadata.sorted_tables}
+    legacy_tables = [
+        table
+        for table in SQLModel.metadata.sorted_tables
+        if table.name != "ruleexecutionlease"
+    ]
+    SQLModel.metadata.create_all(seed_engine, tables=legacy_tables)
+    assert set(inspect(seed_engine).get_table_names()) == expected_tables - {
+        "ruleexecutionlease"
+    }
+    seed_engine.dispose()
+
+    engines = [create_db_engine(database_url), create_db_engine(database_url)]
+    create_barrier = Barrier(2)
+
+    def synchronize_lease_creation(_target, _connection, **_kwargs):
+        try:
+            create_barrier.wait(timeout=1)
+        except BrokenBarrierError:
+            pass
+
+    event.listen(RuleExecutionLease.__table__, "before_create", synchronize_lease_creation)
+    try:
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            futures = [pool.submit(init_db, engine) for engine in engines]
+            for future in futures:
+                future.result()
+    finally:
+        event.remove(
+            RuleExecutionLease.__table__,
+            "before_create",
+            synchronize_lease_creation,
+        )
+        for engine in engines:
+            engine.dispose()
+
+    verification_engine = create_db_engine(database_url)
+    try:
+        assert set(inspect(verification_engine).get_table_names()) == expected_tables
+    finally:
+        verification_engine.dispose()
 
 
 def test_init_db_adds_sql_server_connection_option_columns_to_existing_sqlite_table(tmp_path):
