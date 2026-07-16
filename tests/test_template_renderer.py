@@ -107,3 +107,27 @@ def test_summary_table_uses_columns_from_first_row():
     assert "<th>id</th>" in message.html_body
     assert "<th>amount</th>" in message.html_body
     assert "not rendered" not in message.html_body
+
+
+@pytest.mark.parametrize(
+    "template_text",
+    [
+        "{{ ''.__class__.__mro__ }}",
+        "{{ cycler.__init__.__globals__ }}",
+    ],
+)
+def test_template_renderer_rejects_unsafe_python_access(template_text):
+    with pytest.raises(TemplateRenderError):
+        render_per_row("预警", template_text, {"id": 1}, {"rule_name": "测试"})
+
+
+def test_template_renderer_keeps_safe_conditions_and_loops():
+    rendered = render_summary(
+        "{{ rule_name }}",
+        "{% if row_count %}{% for row in rows %}{{ row.id }}{% endfor %}{% endif %}",
+        [{"id": 1}, {"id": 2}],
+        {"rule_name": "测试", "row_count": 2, "rows": [{"id": 1}, {"id": 2}]},
+    )
+
+    assert rendered.subject == "测试"
+    assert rendered.html_body == "12"

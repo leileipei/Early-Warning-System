@@ -372,6 +372,17 @@ def test_template_error_fails_without_sending_email():
     assert mailer.messages == []
 
 
+def test_unsafe_template_fails_without_sending_email():
+    mailer = FakeMailer()
+    executor = RuleExecutor(sql_client=FakeSqlClient([{"id": 1}]), mailer=mailer)
+
+    result = executor.execute(make_rule(body_template="{{ ''.__class__.__mro__ }}"))
+
+    assert result.status == ExecutionStatus.FAILED
+    assert result.error_type == "TemplateRenderError"
+    assert mailer.messages == []
+
+
 def test_empty_recipients_fail_before_rendering_or_sending():
     mailer = FakeMailer()
     executor = RuleExecutor(sql_client=FakeSqlClient([{"id": 1, "amount": 100}]), mailer=mailer)

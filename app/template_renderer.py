@@ -1,7 +1,8 @@
 from dataclasses import dataclass
 from html import escape
 
-from jinja2 import StrictUndefined, Template, TemplateError
+from jinja2 import StrictUndefined, TemplateError
+from jinja2.sandbox import ImmutableSandboxedEnvironment
 from markupsafe import Markup
 
 
@@ -15,13 +16,23 @@ class RenderedMessage:
     html_body: str
 
 
+def _build_environment(*, autoescape: bool) -> ImmutableSandboxedEnvironment:
+    environment = ImmutableSandboxedEnvironment(
+        undefined=StrictUndefined,
+        autoescape=autoescape,
+    )
+    environment.globals.clear()
+    return environment
+
+
+_SUBJECT_ENVIRONMENT = _build_environment(autoescape=False)
+_BODY_ENVIRONMENT = _build_environment(autoescape=True)
+
+
 def _render(template_text: str, context: dict, *, autoescape: bool) -> str:
+    environment = _BODY_ENVIRONMENT if autoescape else _SUBJECT_ENVIRONMENT
     try:
-        return Template(
-            template_text,
-            undefined=StrictUndefined,
-            autoescape=autoescape,
-        ).render(**context)
+        return environment.from_string(template_text).render(**context)
     except TemplateError as exc:
         raise TemplateRenderError(str(exc)) from exc
 
