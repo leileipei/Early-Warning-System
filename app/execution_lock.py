@@ -14,6 +14,25 @@ class RuleExecutionInProgressError(Exception):
     pass
 
 
+def _release_rule_execution_lease(
+    session: Session,
+    rule_id: int,
+    owner_token: str,
+) -> None:
+    try:
+        session.rollback()
+        session.execute(
+            delete(RuleExecutionLease).where(
+                RuleExecutionLease.rule_id == rule_id,
+                RuleExecutionLease.owner_token == owner_token,
+            )
+        )
+        session.commit()
+    except BaseException:
+        session.rollback()
+        raise
+
+
 @contextmanager
 def rule_execution_lease(
     session: Session,
@@ -55,12 +74,11 @@ def rule_execution_lease(
 
     try:
         yield
-    finally:
-        session.rollback()
-        session.execute(
-            delete(RuleExecutionLease).where(
-                RuleExecutionLease.rule_id == rule_id,
-                RuleExecutionLease.owner_token == owner_token,
-            )
-        )
-        session.commit()
+    except BaseException:
+        try:
+            _release_rule_execution_lease(session, rule_id, owner_token)
+        except BaseException:
+            pass
+        raise
+    else:
+        _release_rule_execution_lease(session, rule_id, owner_token)
