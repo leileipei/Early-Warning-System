@@ -8,6 +8,32 @@ import pytest
 from app.template_renderer import TemplateRenderError, render_per_row, render_summary
 
 
+def _has_safe_jinja_version_range(requirement: Requirement) -> bool:
+    minimum_safe_version = Version("3.1.6")
+    declared_lower_bounds = [
+        Version(specifier.version)
+        for specifier in requirement.specifier
+        if specifier.operator in {">", ">=", "~="}
+    ]
+
+    return bool(declared_lower_bounds) and max(declared_lower_bounds) >= minimum_safe_version
+
+
+@pytest.mark.parametrize(
+    ("requirement_text", "expected"),
+    [
+        ("jinja2>=3.1.6", True),
+        ("jinja2~=3.1.6", True),
+        ("jinja2>=3.2", True),
+        ("jinja2>3.1.5", False),
+        ("jinja2>=3.1", False),
+        ("jinja2>=3.1.6,<4", True),
+    ],
+)
+def test_safe_jinja_version_range(requirement_text, expected):
+    assert _has_safe_jinja_version_range(Requirement(requirement_text)) is expected
+
+
 def test_jinja_dependency_requires_patched_release():
     pyproject = tomllib.loads(
         (Path(__file__).parents[1] / "pyproject.toml").read_text(encoding="utf-8")
@@ -19,31 +45,7 @@ def test_jinja_dependency_requires_patched_release():
         dependency for dependency in dependencies if dependency.name.lower() == "jinja2"
     )
 
-    vulnerable_release = Version("3.1.5")
-    first_patched_release = Version("3.1.6")
-    declared_lower_bounds = [
-        (specifier.operator, Version(specifier.version))
-        for specifier in jinja_dependency.specifier
-        if specifier.operator in {">", ">="}
-    ]
-    has_patched_security_floor = any(
-        version > vulnerable_release
-        or (operator == ">" and version == vulnerable_release)
-        for operator, version in declared_lower_bounds
-    )
-    has_higher_security_floor = any(
-        version > first_patched_release
-        or (operator == ">" and version == first_patched_release)
-        for operator, version in declared_lower_bounds
-    )
-
-    assert vulnerable_release not in jinja_dependency.specifier
-    assert declared_lower_bounds
-    assert has_patched_security_floor
-    assert (
-        first_patched_release in jinja_dependency.specifier
-        or has_higher_security_floor
-    )
+    assert _has_safe_jinja_version_range(jinja_dependency)
 
 
 def test_render_summary_includes_html_table():

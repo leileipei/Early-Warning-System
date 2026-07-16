@@ -1,7 +1,7 @@
 import importlib
 import sys
 from concurrent.futures import ThreadPoolExecutor
-from threading import Barrier, BrokenBarrierError, Lock
+from threading import Barrier, Lock
 
 import pytest
 from sqlalchemy import event, inspect, text
@@ -136,40 +136,44 @@ def test_init_db_serializes_concurrent_sqlite_upgrade_missing_only_lease_table(t
     seed_engine.dispose()
 
     engines = [create_db_engine(database_url), create_db_engine(database_url)]
-    start_barrier = Barrier(3)
-    create_barrier = Barrier(2)
-    started_calls = set()
+    begin_barrier = Barrier(3)
+    begin_attempts = set()
     lease_create_calls = []
-    started_calls_lock = Lock()
+    calls_lock = Lock()
 
-    def make_start_listener(call_number):
-        def synchronize_start(_connection):
-            with started_calls_lock:
-                if call_number in started_calls:
+    def make_begin_listener(call_number):
+        def synchronize_begin(
+            _connection,
+            _cursor,
+            statement,
+            _parameters,
+            _context,
+            _executemany,
+        ):
+            if statement.strip().upper() != "BEGIN IMMEDIATE":
+                return
+            with calls_lock:
+                if call_number in begin_attempts:
                     return
-                started_calls.add(call_number)
-            start_barrier.wait(timeout=5)
+                begin_attempts.add(call_number)
+            begin_barrier.wait(timeout=5)
 
-        return synchronize_start
+        return synchronize_begin
 
-    start_listeners = [make_start_listener(index) for index in range(len(engines))]
-    for engine, listener in zip(engines, start_listeners, strict=True):
-        event.listen(engine, "engine_connect", listener)
+    begin_listeners = [make_begin_listener(index) for index in range(len(engines))]
+    for engine, listener in zip(engines, begin_listeners, strict=True):
+        event.listen(engine, "before_cursor_execute", listener)
 
-    def synchronize_lease_creation(_target, _connection, **_kwargs):
-        with started_calls_lock:
+    def record_lease_creation(_target, _connection, **_kwargs):
+        with calls_lock:
             lease_create_calls.append(1)
-        try:
-            create_barrier.wait(timeout=1)
-        except BrokenBarrierError:
-            pass
 
-    event.listen(RuleExecutionLease.__table__, "before_create", synchronize_lease_creation)
+    event.listen(RuleExecutionLease.__table__, "before_create", record_lease_creation)
     try:
         with ThreadPoolExecutor(max_workers=2) as pool:
             futures = [pool.submit(init_db, engine) for engine in engines]
-            start_barrier.wait(timeout=5)
-            assert started_calls == {0, 1}
+            begin_barrier.wait(timeout=5)
+            assert begin_attempts == {0, 1}
             for future in futures:
                 future.result()
             assert len(lease_create_calls) == 1
@@ -177,10 +181,10 @@ def test_init_db_serializes_concurrent_sqlite_upgrade_missing_only_lease_table(t
         event.remove(
             RuleExecutionLease.__table__,
             "before_create",
-            synchronize_lease_creation,
+            record_lease_creation,
         )
-        for engine, listener in zip(engines, start_listeners, strict=True):
-            event.remove(engine, "engine_connect", listener)
+        for engine, listener in zip(engines, begin_listeners, strict=True):
+            event.remove(engine, "before_cursor_execute", listener)
             engine.dispose()
 
     verification_engine = create_db_engine(database_url)
