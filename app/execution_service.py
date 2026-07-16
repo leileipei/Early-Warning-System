@@ -7,6 +7,7 @@ from datetime import datetime, timedelta
 from sqlmodel import Session, select
 
 from app.crypto import SecretCipher
+from app.execution_lock import rule_execution_lease
 from app.executor import ExecutionResult, RuleExecutor
 from app.mailer import SmtpMailer
 from app.models import (
@@ -85,34 +86,39 @@ def execute_rule_by_id(
     if rule is None or rule.archived_at is not None:
         raise RuleNotFoundError(f"rule {rule_id} not found")
 
-    started_at = datetime.utcnow()
-    total_attempts = max(1, max_attempts)
-    result = None
-    attempts_used = 0
-    for attempt in range(1, total_attempts + 1):
-        attempts_used = attempt
-        result = _execute_rule_once(session, rule, trigger_type)
-        if not _is_retryable_result(result) or attempt == total_attempts:
-            break
-        if retry_delay_seconds > 0:
-            sleep_fn(retry_delay_seconds)
+    with rule_execution_lease(
+        session,
+        rule_id,
+        lease_seconds=get_settings().rule_execution_lease_seconds,
+    ):
+        started_at = datetime.utcnow()
+        total_attempts = max(1, max_attempts)
+        result = None
+        attempts_used = 0
+        for attempt in range(1, total_attempts + 1):
+            attempts_used = attempt
+            result = _execute_rule_once(session, rule, trigger_type)
+            if not _is_retryable_result(result) or attempt == total_attempts:
+                break
+            if retry_delay_seconds > 0:
+                sleep_fn(retry_delay_seconds)
 
-    if result is None:
-        result = ExecutionResult(
-            status=ExecutionStatus.FAILED,
-            error_type="RuntimeError",
-            error_message="规则执行失败",
+        if result is None:
+            result = ExecutionResult(
+                status=ExecutionStatus.FAILED,
+                error_type="RuntimeError",
+                error_message="规则执行失败",
+            )
+
+        result = _with_exhausted_retry_message(result, attempts_used)
+        return persist_execution_result(
+            session=session,
+            rule=rule,
+            trigger_type=trigger_type,
+            result=result,
+            started_at=started_at,
+            finished_at=datetime.utcnow(),
         )
-
-    result = _with_exhausted_retry_message(result, attempts_used)
-    return persist_execution_result(
-        session=session,
-        rule=rule,
-        trigger_type=trigger_type,
-        result=result,
-        started_at=started_at,
-        finished_at=datetime.utcnow(),
-    )
 
 
 def _execute_rule_once(session: Session, rule: AlertRule, trigger_type: TriggerType) -> ExecutionResult:

@@ -3,6 +3,7 @@ import json
 import re
 from datetime import datetime
 from pathlib import Path
+from unittest.mock import Mock
 
 import pytest
 from fastapi.testclient import TestClient
@@ -2764,6 +2765,27 @@ def test_run_rule_persists_success_and_redirects(monkeypatch, session):
         mail_log = session.exec(select(MailLog)).one()
         assert mail_log.status == MailStatus.SUCCESS
         assert mail_log.subject == "大额订单预警"
+    finally:
+        app.dependency_overrides.clear()
+        get_settings.cache_clear()
+
+
+def test_run_rule_returns_conflict_when_execution_lease_is_busy(monkeypatch, session):
+    from app.execution_lock import RuleExecutionInProgressError
+
+    data_source = _create_data_source(session)
+    rule = _create_rule(session, data_source)
+    monkeypatch.setattr(
+        "app.routes.execute_rule_by_id",
+        Mock(side_effect=RuleExecutionInProgressError("busy")),
+    )
+    client, get_settings, app = _client_with_admin(monkeypatch, session)
+    try:
+        response = client.post(f"/rules/{rule.id}/run")
+
+        assert response.status_code == 409
+        assert "规则正在执行，请稍后重试" in response.text
+        assert session.exec(select(ExecutionLog)).all() == []
     finally:
         app.dependency_overrides.clear()
         get_settings.cache_clear()

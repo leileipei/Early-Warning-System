@@ -1,7 +1,10 @@
+from types import SimpleNamespace
+
 import pytest
 from sqlmodel import select
 
 import app.execution_service as execution_service
+from app.execution_lock import RuleExecutionInProgressError, rule_execution_lease
 from app.executor import RuleExecutor
 from app.mailer import MailSendResult
 from app.models import (
@@ -11,6 +14,7 @@ from app.models import (
     ExecutionStatus,
     MailLog,
     MailStatus,
+    RuleExecutionLease,
     SendMode,
     SmtpConfig,
     SqlDataSource,
@@ -95,6 +99,15 @@ class RecordingSmtpClient:
 
     def login(self, username, password):
         return None
+
+
+@pytest.fixture(autouse=True)
+def execution_settings(monkeypatch):
+    monkeypatch.setattr(
+        execution_service,
+        "get_settings",
+        lambda: SimpleNamespace(rule_execution_lease_seconds=60),
+    )
 
 
 @pytest.mark.parametrize("use_ssl", [False, True])
@@ -563,6 +576,60 @@ def test_execute_rule_by_id_rejects_archived_rule_without_execution_log(session)
         execution_service.execute_rule_by_id(session, rule.id)
 
     assert session.exec(select(ExecutionLog)).all() == []
+
+
+def test_execute_rule_by_id_rejects_existing_execution_lease_without_building_clients(monkeypatch, session):
+    data_source = persist_data_source(session)
+    persist_smtp_config(session)
+    rule = persist_rule(session, data_source)
+    monkeypatch.setattr(execution_service, "build_sql_client", pytest.fail)
+    monkeypatch.setattr(execution_service, "build_smtp_mailer", pytest.fail)
+
+    with rule_execution_lease(session, rule.id, lease_seconds=60):
+        with pytest.raises(RuleExecutionInProgressError):
+            execution_service.execute_rule_by_id(session, rule.id, retry_delay_seconds=0)
+
+    assert session.exec(select(ExecutionLog)).all() == []
+
+
+def test_execute_rule_by_id_releases_lease_after_result_is_persisted(monkeypatch, session):
+    data_source = persist_data_source(session)
+    persist_smtp_config(session)
+    rule = persist_rule(session, data_source)
+    monkeypatch.setattr(execution_service, "build_sql_client", lambda source: FakeSqlClient([]))
+    monkeypatch.setattr(execution_service, "build_smtp_mailer", lambda config: FakeMailer())
+    persist_result = execution_service.persist_execution_result
+
+    def persist_with_active_lease(**kwargs):
+        assert session.get(RuleExecutionLease, rule.id) is not None
+        return persist_result(**kwargs)
+
+    monkeypatch.setattr(execution_service, "persist_execution_result", persist_with_active_lease)
+
+    execution_service.execute_rule_by_id(session, rule.id, retry_delay_seconds=0)
+
+    assert session.get(RuleExecutionLease, rule.id) is None
+
+
+def test_execute_rule_by_id_releases_lease_when_persisting_result_fails(monkeypatch, session):
+    data_source = persist_data_source(session)
+    persist_smtp_config(session)
+    rule = persist_rule(session, data_source)
+    sql_client = SequenceSqlClient([RuntimeError("query timed out"), []])
+    monkeypatch.setattr(execution_service, "build_sql_client", lambda source: sql_client)
+    monkeypatch.setattr(execution_service, "build_smtp_mailer", lambda config: FakeMailer())
+
+    def fail_to_persist(**kwargs):
+        assert session.get(RuleExecutionLease, rule.id) is not None
+        raise RuntimeError("execution log persistence failed")
+
+    monkeypatch.setattr(execution_service, "persist_execution_result", fail_to_persist)
+
+    with pytest.raises(RuntimeError, match="execution log persistence failed"):
+        execution_service.execute_rule_by_id(session, rule.id, retry_delay_seconds=0)
+
+    assert len(sql_client.calls) == 2
+    assert session.get(RuleExecutionLease, rule.id) is None
 
 
 def test_execute_rule_by_id_retries_transient_sql_failure_then_persists_success(monkeypatch, session):

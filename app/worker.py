@@ -5,6 +5,7 @@ from collections.abc import Callable
 from sqlmodel import Session, select
 
 from app.db import get_engine, init_db
+from app.execution_lock import RuleExecutionInProgressError
 from app.execution_service import execute_rule_by_id
 from app.models import AlertRule, TriggerType
 from app.scheduler import RuleScheduleSynchronizer, build_scheduler
@@ -21,7 +22,10 @@ def build_execute_rule_callback(
     def execute_rule(rule_id: int) -> None:
         factory = session_factory or (lambda: Session(get_engine()))
         with factory() as session:
-            execute_rule_by_id_fn(session, rule_id, TriggerType.SCHEDULED)
+            try:
+                execute_rule_by_id_fn(session, rule_id, TriggerType.SCHEDULED)
+            except RuleExecutionInProgressError:
+                logger.warning("规则正在执行，跳过本次调度: rule_id=%s", rule_id)
 
     return execute_rule
 

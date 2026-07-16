@@ -11,6 +11,7 @@ from sqlmodel import Session, select
 
 from app.auth import require_admin
 from app.crypto import SecretCipher
+from app.execution_lock import RuleExecutionInProgressError
 from app.db import get_session
 from app.execution_service import build_smtp_mailer, build_sql_client, execute_rule_by_id
 from app.mailer import EmailMessage
@@ -1078,14 +1079,26 @@ def archive_rule(
 
 @router.post("/rules/{rule_id}/run")
 def run_rule(
+    request: Request,
     rule_id: int,
     admin: AdminUser = Depends(require_admin),
     session: Session = Depends(get_session),
 ):
-    _ = admin
     _get_active_rule_or_404(session, rule_id)
-
-    execute_rule_by_id(session, rule_id, trigger_type=TriggerType.MANUAL)
+    try:
+        execute_rule_by_id(session, rule_id, trigger_type=TriggerType.MANUAL)
+    except RuleExecutionInProgressError:
+        return _template_response(
+            request,
+            "rules.html",
+            _rules_page_context(
+                request,
+                admin,
+                session,
+                error="规则正在执行，请稍后重试",
+            ),
+            status_code=409,
+        )
     return RedirectResponse("/logs", status_code=303)
 
 

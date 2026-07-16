@@ -47,3 +47,23 @@ def test_sync_rules_once_passes_only_active_rules_to_synchronizer(engine):
     assert result is True
     synced_rules = synchronizer.sync.call_args.args[0]
     assert [rule.id for rule in synced_rules] == [active_rule_id]
+
+
+def test_worker_skips_rule_when_execution_lease_is_busy(caplog):
+    from app.execution_lock import RuleExecutionInProgressError
+    from app.worker import build_execute_rule_callback
+
+    session_context = Mock()
+    session_context.__enter__ = Mock(return_value=session_context)
+    session_context.__exit__ = Mock(return_value=False)
+    execute_rule = Mock(side_effect=RuleExecutionInProgressError("busy"))
+    callback = build_execute_rule_callback(
+        session_factory=lambda: session_context,
+        execute_rule_by_id_fn=execute_rule,
+    )
+
+    with caplog.at_level("WARNING"):
+        callback(42)
+
+    execute_rule.assert_called_once()
+    assert "rule_id=42" in caplog.text
