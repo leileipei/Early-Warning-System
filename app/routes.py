@@ -11,6 +11,7 @@ from sqlmodel import Session, select
 
 from app.auth import require_admin
 from app.crypto import SecretCipher
+from app.dashboard import build_dashboard_context
 from app.execution_lock import RuleExecutionInProgressError
 from app.db import get_session
 from app.execution_service import build_smtp_mailer, build_sql_client, execute_rule_by_id
@@ -644,11 +645,19 @@ def login_page(request: Request):
 
 
 @router.get("/", response_class=HTMLResponse)
-def dashboard(request: Request, admin: AdminUser = Depends(require_admin)):
+def dashboard(
+    request: Request,
+    admin: AdminUser = Depends(require_admin),
+    session: Session = Depends(get_session),
+):
     return _template_response(
         request,
         "dashboard.html",
-        {"admin": admin, "title": "仪表盘"},
+        {
+            "admin": admin,
+            "title": "仪表盘",
+            **build_dashboard_context(session),
+        },
     )
 
 

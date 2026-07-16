@@ -11,26 +11,82 @@
 <section class="metric-grid" aria-label="运行概览">
   <article class="panel metric-card">
     <span class="metric-label status-text">启用规则</span>
-    <strong class="metric-value">0</strong>
+    <strong class="metric-value" data-testid="enabled-rule-count">{{ enabled_rule_count }}</strong>
   </article>
   <article class="panel metric-card">
     <span class="metric-label status-text">今日执行</span>
-    <strong class="metric-value">0</strong>
+    <strong class="metric-value" data-testid="today-execution-count">{{ today_execution_count }}</strong>
   </article>
   <article class="panel metric-card">
-    <span class="metric-label status-text">待处理告警</span>
-    <strong class="metric-value">0</strong>
+    <span class="metric-label status-text">近 24 小时失败</span>
+    <strong class="metric-value" data-testid="recent-failure-count">{{ recent_failure_count }}</strong>
   </article>
 </section>
 
 <section class="two-column">
-  <article class="panel">
+  <article class="panel table-panel">
     <h2 class="section-heading">最近执行</h2>
+    {% if recent_executions %}
+    <div class="table-shell">
+      <table>
+        <thead>
+          <tr>
+            <th>规则</th>
+            <th>开始时间</th>
+            <th>触发</th>
+            <th>状态</th>
+            <th>行数</th>
+            <th>邮件</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for item in recent_executions %}
+          <tr>
+            <td>{{ item.rule_name }}</td>
+            <td>{{ item.log.started_at.strftime("%Y-%m-%d %H:%M:%S") }}</td>
+            <td>{{ item.log.trigger_type.value }}</td>
+            <td>
+              <span class="status-text {% if item.log.status.value == 'success' %}status-success{% elif item.log.status.value == 'running' %}status-warning{% else %}status-danger{% endif %}">
+                {{ item.log.status.value }}
+              </span>
+            </td>
+            <td>{{ item.log.row_count }}</td>
+            <td>{{ item.log.email_count }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
     <p class="empty-state">暂无执行记录</p>
+    {% endif %}
   </article>
-  <article class="panel">
-    <h2 class="section-heading">邮件概览</h2>
+  <article class="panel table-panel">
+    <h2 class="section-heading">近 24 小时邮件</h2>
+    {% if mail_success_count or mail_failure_count %}
+    <div class="table-shell">
+      <table>
+        <thead>
+          <tr>
+            <th>状态</th>
+            <th>数量</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><span class="status-text status-success">成功</span></td>
+            <td data-testid="mail-success-count">{{ mail_success_count }}</td>
+          </tr>
+          <tr>
+            <td><span class="status-text status-danger">失败</span></td>
+            <td data-testid="mail-failure-count">{{ mail_failure_count }}</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    {% else %}
     <p class="empty-state">暂无邮件日志</p>
+    {% endif %}
   </article>
 </section>
 {% endblock %}

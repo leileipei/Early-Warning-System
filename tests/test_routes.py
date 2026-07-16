@@ -451,6 +451,34 @@ def test_dashboard_redirects_browser_to_login_when_unauthenticated(monkeypatch):
         get_settings.cache_clear()
 
 
+def test_dashboard_uses_real_metrics(monkeypatch, session):
+    data_source = _create_data_source(session)
+    rule = _create_rule(session, data_source, name="实时规则")
+    session.add(
+        ExecutionLog(
+            rule_id=rule.id,
+            trigger_type=TriggerType.MANUAL,
+            status=ExecutionStatus.FAILED,
+            started_at=datetime.utcnow(),
+            row_count=3,
+            email_count=1,
+        )
+    )
+    session.commit()
+    client, get_settings, app = _client_with_admin(monkeypatch, session)
+    try:
+        response = client.get("/")
+
+        assert response.status_code == 200
+        assert 'data-testid="enabled-rule-count">1</strong>' in response.text
+        assert 'data-testid="recent-failure-count">1</strong>' in response.text
+        assert "实时规则" in response.text
+        assert "暂无执行记录" not in response.text
+    finally:
+        app.dependency_overrides.clear()
+        get_settings.cache_clear()
+
+
 def test_rules_page_requires_login(monkeypatch):
     _set_required_settings(monkeypatch)
     create_app, get_settings = _load_create_app()
