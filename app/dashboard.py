@@ -48,6 +48,7 @@ def build_dashboard_context(session: Session, *, now: datetime | None = None) ->
     recent_failure_count = session.exec(
         select(func.count()).select_from(ExecutionLog).where(
             ExecutionLog.started_at >= recent_start,
+            ExecutionLog.started_at <= current,
             or_(
                 ExecutionLog.status == ExecutionStatus.FAILED,
                 ExecutionLog.status == ExecutionStatus.PARTIAL_FAILED,
@@ -57,7 +58,7 @@ def build_dashboard_context(session: Session, *, now: datetime | None = None) ->
     recent_rows = session.exec(
         select(ExecutionLog, AlertRule.name)
         .join(AlertRule, AlertRule.id == ExecutionLog.rule_id)
-        .order_by(ExecutionLog.started_at.desc())
+        .order_by(ExecutionLog.started_at.desc(), ExecutionLog.id.desc())
         .limit(5)
     ).all()
 
@@ -65,6 +66,7 @@ def build_dashboard_context(session: Session, *, now: datetime | None = None) ->
         return session.exec(
             select(func.count()).select_from(MailLog).where(
                 MailLog.sent_at >= recent_start,
+                MailLog.sent_at <= current,
                 MailLog.status == status,
             )
         ).one()

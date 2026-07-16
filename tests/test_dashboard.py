@@ -160,6 +160,60 @@ def test_dashboard_context_uses_real_counts_and_recent_rows(session):
     assert context["recent_executions"][0]["rule_name"] == "最新规则"
 
 
+def test_dashboard_recent_window_includes_boundaries_and_excludes_future_records(session):
+    now = datetime(2026, 7, 16, 2, 0, 0)
+    source = _create_source(session)
+    rule = _create_rule(session, source, "窗口规则")
+    lower_boundary = _create_execution(
+        session,
+        rule,
+        started_at=now - timedelta(hours=24),
+        status=ExecutionStatus.FAILED,
+    )
+    current_boundary = _create_execution(
+        session,
+        rule,
+        started_at=now,
+        status=ExecutionStatus.PARTIAL_FAILED,
+    )
+    future = _create_execution(
+        session,
+        rule,
+        started_at=now + timedelta(seconds=1),
+        status=ExecutionStatus.FAILED,
+    )
+    _create_mail(
+        session,
+        lower_boundary,
+        status=MailStatus.SUCCESS,
+        sent_at=now - timedelta(hours=24),
+    )
+    _create_mail(
+        session,
+        current_boundary,
+        status=MailStatus.FAILED,
+        sent_at=now,
+    )
+    _create_mail(
+        session,
+        future,
+        status=MailStatus.SUCCESS,
+        sent_at=now + timedelta(seconds=1),
+    )
+    _create_mail(
+        session,
+        future,
+        status=MailStatus.FAILED,
+        sent_at=now + timedelta(seconds=1),
+    )
+
+    context = build_dashboard_context(session, now=now)
+
+    assert context["recent_failure_count"] == 2
+    assert context["mail_success_count"] == 1
+    assert context["mail_failure_count"] == 1
+
+
 def test_dashboard_today_count_uses_shanghai_midnight(session):
     now = datetime(2026, 7, 15, 16, 30, 0)
     source = _create_source(session)
@@ -204,6 +258,26 @@ def test_dashboard_recent_executions_returns_latest_five(session):
 
     returned_times = [item["log"].started_at for item in context["recent_executions"]]
     assert returned_times == [now - timedelta(minutes=value) for value in range(5)]
+
+
+def test_dashboard_recent_executions_breaks_timestamp_ties_by_latest_id(session):
+    now = datetime(2026, 7, 16, 2, 0, 0)
+    source = _create_source(session)
+    rule = _create_rule(session, source, "同时间规则")
+    executions = [
+        _create_execution(
+            session,
+            rule,
+            started_at=now,
+            status=ExecutionStatus.SUCCESS,
+        )
+        for _ in range(6)
+    ]
+
+    context = build_dashboard_context(session, now=now)
+
+    returned_ids = [item["log"].id for item in context["recent_executions"]]
+    assert returned_ids == [execution.id for execution in reversed(executions[1:])]
 
 
 def test_dashboard_empty_database_returns_real_zeroes(session):

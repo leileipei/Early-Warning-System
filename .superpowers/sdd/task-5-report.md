@@ -40,3 +40,33 @@
 ## 提交
 
 - `feat: show live operational dashboard metrics`
+
+## 审查修复：近 24 小时上界
+
+- RED：新增 `test_dashboard_recent_window_includes_boundaries_and_excludes_future_records`，
+  运行该测试后失败；未来一秒的失败记录被计入，实际为 `3`、期望为 `2`。
+- GREEN：失败执行与邮件成功/失败查询均追加 `<= current`，明确窗口为
+  `[current - 24h, current]`；精确下界和精确当前时间包含，未来记录排除。
+- 验证：该测试单独运行，`1 passed`。
+
+## 审查修复：最近执行稳定排序
+
+- RED：新增 `test_dashboard_recent_executions_breaks_timestamp_ties_by_latest_id`，
+  同时间戳结果实际为 `[1, 2, 3, 4, 5]`，期望为 `[6, 5, 4, 3, 2]`。
+- GREEN：最近执行查询追加 `ExecutionLog.id DESC` 次级排序，`limit 5` 边界稳定。
+- 验证：该测试单独运行，`1 passed`。
+
+## 审查修复验证
+
+- `.venv/bin/python -m pytest tests/test_dashboard.py -q`：`6 passed`。
+- `.venv/bin/python -m pytest tests/test_dashboard.py tests/test_routes.py -k
+  "dashboard or navigation" -q`：`9 passed, 138 deselected`。
+- `.venv/bin/python -m pytest -q`：`342 passed`（仅既有第三方弃用警告）。
+- `.venv/bin/ruff check .`：通过。
+- `git diff --check`：通过，无空白错误。
+- 修复提交：`fix: bound and stabilize dashboard metrics`。
+
+## 审查修复自审与顾虑
+
+- 生产代码仅增加查询上界与确定性排序；未触碰路由、模板、进度账本或其他任务文件。
+- 无视觉变更。剩余输出仅为既有 `crypt` 与 Starlette/httpx 弃用警告，不影响本次行为。
