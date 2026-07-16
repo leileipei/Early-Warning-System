@@ -66,3 +66,10 @@ ruff check .
 当前使用 HTTP 时保持 `SESSION_COOKIE_SECURE=false`；完成 HTTPS 反向代理后必须改为 `true`。后台所有修改类表单使用 Session CSRF Token。登录默认在 15 分钟内失败 5 次后锁定 15 分钟。
 
 相关环境变量：`SESSION_COOKIE_SECURE`、`LOGIN_MAX_FAILURES`、`LOGIN_FAILURE_WINDOW_SECONDS`、`LOGIN_LOCKOUT_SECONDS`。
+
+## 生产加固说明
+
+- 邮件模板运行在不可变 Jinja 沙箱中，禁止访问 Python 内部对象；拦截后规则失败且不会发送邮件。
+- SMTP SSL 和 STARTTLS 校验服务器证书及主机名。私有 CA 使用系统信任库或启动前设置 `SSL_CERT_FILE`。
+- 同一规则通过 SQLite 租约避免 Web、Worker 和多进程并发执行。租约默认 `7200` 秒，可用 `RULE_EXECUTION_LEASE_SECONDS` 调整。
+- 仪表盘展示数据库中的启用规则、上海自然日执行次数、近 24 小时失败、最近执行及邮件结果。

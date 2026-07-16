@@ -388,3 +388,25 @@ python3 -m app.worker
 ```bash
 python3 -m app.admin_cli admin
 ```
+
+## 20. 生产加固配置
+
+### 20.1 规则执行租约
+
+Web 与 Worker 必须连接同一个 SQLite 数据库。默认配置如下：
+
+```dotenv
+RULE_EXECUTION_LEASE_SECONDS=7200
+```
+
+该值表示进程异常终止后，其他执行者可接管同一规则的等待秒数。规则可能运行超过两小时时，应在 Web 与 Worker 的环境中设置更大的相同值并重启两个服务。本版本没有租约心跳。
+
+### 20.2 SMTP 私有 CA
+
+SMTP SSL 和 STARTTLS 始终校验证书链与主机名。企业私有 CA 应安装到操作系统信任库，或在启动 Web 与 Worker 前设置：
+
+```bash
+export SSL_CERT_FILE=/absolute/path/company-ca.pem
+```
+
+证书中的主机名必须与 SMTP 配置页面填写的主机一致。系统不提供跳过 SMTP 证书校验的开关。
