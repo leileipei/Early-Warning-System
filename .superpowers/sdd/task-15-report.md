@@ -1,12 +1,11 @@
-# Task 15 本地验收阶段报告
+# Task 15 验收账本
 
 ## 状态
 
-`DONE_WITH_CONCERNS`
+`DONE`
 
-本报告仅覆盖本地验收步骤 1-3 和本阶段文档提交。按控制器要求，未推送、未创建或更新
-PR、未执行浏览器验收、未执行最终独立代码审查，且未创建
-`docs/project-acceptance-report.md` 最终验收报告。
+本账本初始记录本地验收步骤 1-3；控制器已完成 CI、浏览器验收和独立代码审查。
+最终事实型验收报告已创建于 `docs/project-acceptance-report.md`。本账本不替代该报告。
 
 ## 本阶段文档
 
@@ -92,7 +91,8 @@ id  enabled  updated_at
 /tmp/ews-task15-py311/bin/pytest --cov=app --cov-report=term-missing --cov-fail-under=93
 ```
 
-实际输出：`490 passed in 20.40s`，`Total coverage: 94.63%`，满足 `>=93%`。
+2026-07-17 的最终锁环境复验（Python 3.11.15）实际输出：`507 passed in 22.49s`，
+`Total coverage: 94.55%`，满足 `>=93%`。
 
 ```bash
 /tmp/ews-task15-py311/bin/pip check
@@ -139,13 +139,20 @@ git diff --check
 
 实际结果：退出 0，无输出。
 
-## Concerns 与控制器后续门槛
+## 原样扫描说明
 
-1. 简报指定的原样占位符扫描不能退出 0，因为它同时搜索测试和用于拒绝占位符的生产校验。
-   该命中不表示运行时密钥泄漏，也未在本任务中为使扫描通过而弱化安全校验；需由控制器
-   确认是否接受该扫描范围，或在后续任务中调整扫描规则。
-2. 待控制器完成 GitHub Actions 的 Python 3.11、3.12、3.13 CI 矩阵。
-3. 待控制器完成桌面与移动浏览器验收及截图检查。
-4. 待控制器完成最终独立代码审查。
-5. 仅在上述外部门槛全部通过后，才能创建最终事实型验收报告
-   `docs/project-acceptance-report.md`。
+简报指定的原样占位符扫描不能退出 0，因为它同时搜索测试和用于拒绝占位符的生产校验。
+该命中不表示运行时密钥泄漏，也没有为使扫描通过而弱化安全校验。精确检查结论为：运行
+代码无 `datetime.utcnow`，无 Passlib 依赖，锁文件无 `bcrypt<4`；`.env.example` 仅有两条
+明确用于拒绝占位符的示例。
+
+## 外部门槛完成记录
+
+- GitHub PR：<https://github.com/leileipei/Early-Warning-System/pull/2>（draft，
+  `codex/production-readiness` 到 `main`）。HEAD `77b362d` 的 push/PR 两组 CI，
+  Python 3.11、3.12、3.13 共六个 job 均通过；run IDs 为 `29580393575` 与 `29580395226`。
+- 浏览器验收：真实本地 Web 与 Worker 使用测试数据库和 adapter，桌面 `1440x900` 与移动
+  `390x844` 验收通过；截图位于 `/tmp/ews-acceptance/`。
+- 独立审查：`182048e..8285d66` 的 3 个 Important 与 1 个 Minor 均由
+  `77b362d fix: surface production readiness failures` 修复；复审 `8285d66..77b362d`
+  为 Critical/Important/Minor 均 0，`Ready to merge=yes`，定点 63 tests 通过。
