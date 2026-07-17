@@ -4,6 +4,7 @@ from pathlib import Path
 import tomllib
 
 from packaging.requirements import Requirement
+from packaging.utils import canonicalize_name
 from packaging.version import Version
 import yaml
 
@@ -17,7 +18,7 @@ def _locked_requirements(filename: str) -> dict[str, Requirement]:
         if not line or line.startswith(("#", " ", "-")):
             continue
         requirement = Requirement(line.split(" \\ ")[0])
-        requirements[requirement.name.lower()] = requirement
+        requirements[canonicalize_name(requirement.name)] = requirement
     return requirements
 
 
@@ -39,8 +40,7 @@ def test_dependency_locks_and_automation_configuration_are_release_ready():
 
     production = _locked_requirements("requirements.lock")
     development = _locked_requirements("requirements-dev.lock")
-    assert "pytest" not in production
-    assert "ruff" not in production
+    assert not production.keys() & {"pytest", "ruff", "pip-audit", "pip-tools"}
     assert {"pip-audit", "pip-tools", "pytest", "ruff"} <= development.keys()
     assert "passlib" not in production | development
     assert _pinned_version(production["bcrypt"]) >= Version("4")

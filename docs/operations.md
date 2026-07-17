@@ -198,7 +198,8 @@ cp .env backups/env_$(date +%F_%H%M%S)
 ```bash
 git pull
 source .venv/bin/activate
-pip install -e .
+pip install -r requirements.lock
+pip install --no-deps .
 python3 -c "from app.db import init_db; init_db()"
 uvicorn app.main:create_app --factory --host 0.0.0.0 --port 8000
 python3 -m app.worker
