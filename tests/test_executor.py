@@ -3,6 +3,7 @@ from threading import Barrier, Event, Lock
 from types import SimpleNamespace
 
 import pytest
+from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, select
 
 import app.execution_service as execution_service
@@ -824,6 +825,89 @@ def test_execute_rule_by_id_records_suppression_keys_after_success(monkeypatch, 
     assert execution_log.email_count == 1
     assert [suppression.suppression_key for suppression in suppressions] == ["1", "2"]
     assert [suppression.hit_count for suppression in suppressions] == [1, 1]
+
+
+def test_execute_rule_by_id_rolls_back_suppression_and_logs_when_mail_log_flush_fails(
+    monkeypatch,
+    session,
+):
+    data_source = persist_data_source(session)
+    persist_smtp_config(session)
+    rule = persist_rule(
+        session,
+        data_source,
+        suppress_duplicates=True,
+        suppression_key_field="id",
+        suppression_window_hours=24,
+    )
+    monkeypatch.setattr(
+        execution_service,
+        "build_sql_client",
+        lambda data_source: FakeSqlClient([{"id": 1, "amount": 100}]),
+    )
+    monkeypatch.setattr(execution_service, "build_smtp_mailer", lambda config: FakeMailer())
+    original_flush = session.flush
+
+    def fail_when_flushing_mail_log(*args, **kwargs):
+        if any(isinstance(instance, MailLog) for instance in session.new):
+            raise IntegrityError("INSERT INTO mail_log", {}, RuntimeError("mail log flush failed"))
+        return original_flush(*args, **kwargs)
+
+    monkeypatch.setattr(session, "flush", fail_when_flushing_mail_log)
+
+    with pytest.raises(IntegrityError, match="mail log flush failed"):
+        execution_service.execute_rule_by_id(
+            session,
+            rule.id,
+            TriggerType.MANUAL,
+            max_attempts=1,
+            retry_delay_seconds=0,
+        )
+
+    assert session.exec(select(AlertSuppression)).all() == []
+    assert session.exec(select(ExecutionLog)).all() == []
+    assert session.exec(select(MailLog)).all() == []
+    assert session.get(RuleExecutionLease, rule.id) is None
+
+
+def test_execute_rule_by_id_commits_suppression_and_logs_together(monkeypatch, session):
+    data_source = persist_data_source(session)
+    persist_smtp_config(session)
+    rule = persist_rule(
+        session,
+        data_source,
+        suppress_duplicates=True,
+        suppression_key_field="id",
+        suppression_window_hours=24,
+    )
+    monkeypatch.setattr(
+        execution_service,
+        "build_sql_client",
+        lambda data_source: FakeSqlClient([{"id": 1, "amount": 100}]),
+    )
+    monkeypatch.setattr(execution_service, "build_smtp_mailer", lambda config: FakeMailer())
+    original_commit = session.commit
+    commit_count = 0
+
+    def count_commits():
+        nonlocal commit_count
+        commit_count += 1
+        return original_commit()
+
+    monkeypatch.setattr(session, "commit", count_commits)
+
+    execution_service.execute_rule_by_id(
+        session,
+        rule.id,
+        TriggerType.MANUAL,
+        max_attempts=1,
+        retry_delay_seconds=0,
+    )
+
+    assert len(session.exec(select(AlertSuppression)).all()) == 1
+    assert len(session.exec(select(ExecutionLog)).all()) == 1
+    assert len(session.exec(select(MailLog)).all()) == 1
+    assert commit_count == 3
 
 
 def test_execute_rule_by_id_suppresses_repeated_rows_inside_window(monkeypatch, session):
