@@ -1,14 +1,16 @@
 import importlib
 import json
 import re
+from asyncio import run
 from datetime import datetime
 from pathlib import Path
 from unittest.mock import Mock
 
 import pytest
+from fastapi.responses import StreamingResponse
 from fastapi.testclient import TestClient
 from pydantic import ValidationError
-from sqlmodel import select
+from sqlmodel import Session, select
 
 from app.models import (
     AdminUser,
@@ -64,6 +66,10 @@ def _client_with_admin(monkeypatch, session):
     app.dependency_overrides[routes.get_session] = override_session
     app.dependency_overrides[require_csrf] = lambda: None
     return TestClient(app), get_settings, app
+
+
+async def _read_stream_body(response: StreamingResponse) -> str:
+    return "".join([chunk async for chunk in response.body_iterator])
 
 
 def _csrf_token(client: TestClient) -> str:
@@ -2688,7 +2694,7 @@ def test_export_execution_logs_csv(monkeypatch, session):
         email_count=1,
         duration_ms=250,
         error_type="RuntimeError",
-        error_message="连接失败",
+        error_message="=1+1",
     )
     session.add(execution_log)
     session.commit()
@@ -2704,7 +2710,7 @@ def test_export_execution_logs_csv(monkeypatch, session):
         csv_text = response.content.decode("utf-8-sig")
         assert "ID,规则ID,触发方式,状态,开始时间,结束时间,返回行数,邮件数,耗时毫秒,错误类型,错误信息" in csv_text
         assert f"{execution_log.id},{rule.id},manual,failed," in csv_text
-        assert ",3,1,250,RuntimeError,连接失败" in csv_text
+        assert ",3,1,250,RuntimeError,'=1+1" in csv_text
     finally:
         app.dependency_overrides.clear()
         get_settings.cache_clear()
@@ -2743,9 +2749,9 @@ def test_export_mail_logs_csv(monkeypatch, session):
         execution_log_id=execution_log.id,
         recipients="ops@example.com",
         cc_recipients="team@example.com",
-        subject="大额订单预警",
+        subject="@SUM(A1:A2)",
         status=MailStatus.FAILED,
-        error_message="smtp refused",
+        error_message="-2+3",
     )
     session.add(mail_log)
     session.commit()
@@ -2760,10 +2766,53 @@ def test_export_mail_logs_csv(monkeypatch, session):
         assert response.content.startswith("\ufeff".encode())
         csv_text = response.content.decode("utf-8-sig")
         assert "ID,执行记录ID,收件人,抄送,主题,状态,错误信息,发送时间" in csv_text
-        assert f"{mail_log.id},{execution_log.id},ops@example.com,team@example.com,大额订单预警,failed,smtp refused," in csv_text
+        assert f"{mail_log.id},{execution_log.id},ops@example.com,team@example.com,'@SUM(A1:A2),failed,'-2+3," in csv_text
     finally:
         app.dependency_overrides.clear()
         get_settings.cache_clear()
+
+
+def test_export_execution_logs_csv_streams_bounded_batches_after_request_session_closes(
+    monkeypatch, session
+):
+    routes = importlib.import_module("app.routes")
+    data_source = _create_data_source(session)
+    rule = _create_rule(session, data_source)
+    session.add_all(
+        [
+            ExecutionLog(rule_id=rule.id, trigger_type=TriggerType.MANUAL)
+            for _ in range(1200)
+        ]
+    )
+    session.commit()
+    statements = []
+
+    class NoAllResult:
+        def __init__(self, result):
+            self.result = result
+
+        def __iter__(self):
+            return iter(self.result)
+
+        def all(self):
+            raise AssertionError("CSV export must not load all logs at once")
+
+    class TrackingSession(Session):
+        def exec(self, statement, *args, **kwargs):
+            statements.append(statement)
+            return NoAllResult(super().exec(statement, *args, **kwargs))
+
+    monkeypatch.setattr(routes, "Session", TrackingSession)
+
+    response = routes.export_execution_logs_csv(_admin_user(), session)
+
+    assert isinstance(response, StreamingResponse)
+    session.close()
+    csv_text = run(_read_stream_body(response))
+    assert csv_text.startswith("\ufeffID,规则ID,触发方式,状态,")
+    assert csv_text.count("\r\n") == 1201
+    assert len(statements) >= 3
+    assert all(statement._limit_clause.value == 500 for statement in statements)
 
 
 def test_export_execution_logs_csv_requires_login(monkeypatch):

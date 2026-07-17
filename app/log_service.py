@@ -1,4 +1,6 @@
-from collections.abc import Callable
+import csv
+import io
+from collections.abc import Callable, Iterable, Iterator, Sequence
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from math import ceil
@@ -22,6 +24,7 @@ DEFAULT_PAGE_SIZE = 50
 MIN_PAGE_SIZE = 10
 MAX_PAGE_SIZE = 200
 DEFAULT_CLEANUP_BATCH_SIZE = 500
+CSV_EXPORT_BATCH_SIZE = 500
 
 
 @dataclass(frozen=True)
@@ -42,6 +45,63 @@ class Page(Generic[T]):
     total_pages: int
     has_previous: bool
     has_next: bool
+
+
+def csv_safe_cell(value: object) -> object:
+    if isinstance(value, str) and value.startswith(("=", "+", "-", "@")):
+        return "'" + value
+    return value
+
+
+def stream_csv(
+    headers: Sequence[str], row_batches: Iterable[Iterable[Sequence[object]]]
+) -> Iterator[str]:
+    yield "\ufeff"
+    buffer = io.StringIO()
+    writer = csv.writer(buffer)
+    writer.writerow(headers)
+    yield buffer.getvalue()
+    for batch in row_batches:
+        for row in batch:
+            buffer.seek(0)
+            buffer.truncate(0)
+            writer.writerow([csv_safe_cell(cell) for cell in row])
+            yield buffer.getvalue()
+
+
+def iter_execution_log_batches(
+    session_factory: Callable[[], Session],
+) -> Iterator[list[ExecutionLog]]:
+    yield from _iter_log_batches(
+        session_factory,
+        select(ExecutionLog),
+        ExecutionLog.started_at.desc(),
+    )
+
+
+def iter_mail_log_batches(session_factory: Callable[[], Session]) -> Iterator[list[MailLog]]:
+    yield from _iter_log_batches(
+        session_factory,
+        select(MailLog),
+        MailLog.sent_at.desc(),
+    )
+
+
+def _iter_log_batches(
+    session_factory: Callable[[], Session], statement, order_by
+) -> Iterator[list]:
+    offset = 0
+    while True:
+        with session_factory() as session:
+            batch = list(
+                session.exec(
+                    statement.order_by(order_by).offset(offset).limit(CSV_EXPORT_BATCH_SIZE)
+                )
+            )
+        if not batch:
+            return
+        yield batch
+        offset += len(batch)
 
 
 def list_execution_logs(

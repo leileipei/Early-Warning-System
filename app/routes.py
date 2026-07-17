@@ -1,11 +1,14 @@
-import csv
 import json
-from io import StringIO
 from urllib.parse import urlencode
 
 from apscheduler.triggers.cron import CronTrigger
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
-from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
+from fastapi.responses import (
+    HTMLResponse,
+    JSONResponse,
+    RedirectResponse,
+    StreamingResponse,
+)
 from fastapi.templating import Jinja2Templates
 from sqlmodel import Session, select
 
@@ -15,15 +18,21 @@ from app.dashboard import build_dashboard_context
 from app.execution_lock import RuleExecutionInProgressError
 from app.db import get_session
 from app.execution_service import build_smtp_mailer, build_sql_client, execute_rule_by_id
-from app.log_service import DEFAULT_PAGE_SIZE, LogFilters, list_execution_logs, list_mail_logs
+from app.log_service import (
+    DEFAULT_PAGE_SIZE,
+    LogFilters,
+    iter_execution_log_batches,
+    iter_mail_log_batches,
+    list_execution_logs,
+    list_mail_logs,
+    stream_csv,
+)
 from app.mailer import EmailMessage
 from app.models import (
     AdminUser,
     AlertRule,
     AlertRuleVersion,
-    ExecutionLog,
     ExecutionStatus,
-    MailLog,
     MailStatus,
     SendMode,
     SmtpConfig,
@@ -55,14 +64,9 @@ def _template_response(
     )
 
 
-def _csv_response(filename: str, headers: list[str], rows: list[list]) -> Response:
-    stream = StringIO()
-    writer = csv.writer(stream)
-    writer.writerow(headers)
-    writer.writerows(rows)
-    content = "\ufeff" + stream.getvalue()
-    return Response(
-        content,
+def _csv_response(filename: str, headers: list[str], row_batches) -> StreamingResponse:
+    return StreamingResponse(
+        stream_csv(headers, row_batches),
         media_type="text/csv; charset=utf-8",
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
@@ -1552,7 +1556,7 @@ def export_execution_logs_csv(
     session: Session = Depends(get_session),
 ):
     _ = admin
-    execution_logs = session.exec(select(ExecutionLog).order_by(ExecutionLog.started_at.desc())).all()
+    bind = session.get_bind()
     return _csv_response(
         "execution-logs.csv",
         [
@@ -1568,22 +1572,25 @@ def export_execution_logs_csv(
             "错误类型",
             "错误信息",
         ],
-        [
+        (
             [
-                log.id,
-                log.rule_id,
-                log.trigger_type,
-                log.status,
-                log.started_at,
-                log.finished_at or "",
-                log.row_count,
-                log.email_count,
-                log.duration_ms,
-                log.error_type,
-                log.error_message,
+                [
+                    log.id,
+                    log.rule_id,
+                    log.trigger_type,
+                    log.status,
+                    log.started_at,
+                    log.finished_at or "",
+                    log.row_count,
+                    log.email_count,
+                    log.duration_ms,
+                    log.error_type,
+                    log.error_message,
+                ]
+                for log in batch
             ]
-            for log in execution_logs
-        ],
+            for batch in iter_execution_log_batches(lambda: Session(bind=bind))
+        ),
     )
 
 
@@ -1593,21 +1600,24 @@ def export_mail_logs_csv(
     session: Session = Depends(get_session),
 ):
     _ = admin
-    mail_logs = session.exec(select(MailLog).order_by(MailLog.sent_at.desc())).all()
+    bind = session.get_bind()
     return _csv_response(
         "mail-logs.csv",
         ["ID", "执行记录ID", "收件人", "抄送", "主题", "状态", "错误信息", "发送时间"],
-        [
+        (
             [
-                log.id,
-                log.execution_log_id,
-                log.recipients,
-                log.cc_recipients,
-                log.subject,
-                log.status,
-                log.error_message,
-                log.sent_at,
+                [
+                    log.id,
+                    log.execution_log_id,
+                    log.recipients,
+                    log.cc_recipients,
+                    log.subject,
+                    log.status,
+                    log.error_message,
+                    log.sent_at,
+                ]
+                for log in batch
             ]
-            for log in mail_logs
-        ],
+            for batch in iter_mail_log_batches(lambda: Session(bind=bind))
+        ),
     )

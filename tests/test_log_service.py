@@ -16,6 +16,20 @@ from app.models import (
 )
 
 
+@pytest.mark.parametrize("value", ["=1+1", "+cmd", "-2+3", "@SUM(A1:A2)"])
+def test_csv_cell_neutralizes_formula_prefix(value):
+    from app.log_service import csv_safe_cell
+
+    assert csv_safe_cell(value) == "'" + value
+
+
+@pytest.mark.parametrize("value", ["plain text", "", 123, None])
+def test_csv_cell_leaves_safe_values_unchanged(value):
+    from app.log_service import csv_safe_cell
+
+    assert csv_safe_cell(value) == value
+
+
 def _create_rule(session):
     source = SqlDataSource(
         name="log-service-source",
@@ -320,3 +334,27 @@ def test_cleanup_expired_logs_rejects_non_positive_batch_sizes(engine, batch_siz
         cleanup_expired_logs(
             lambda: Session(engine), retention_days=180, batch_size=batch_size
         )
+
+
+def test_execution_log_batches_reraise_query_errors_while_streaming(session, engine):
+    from app.log_service import iter_execution_log_batches
+
+    rule = _create_rule(session)
+    session.add_all(
+        [
+            ExecutionLog(rule_id=rule.id, trigger_type=TriggerType.MANUAL)
+            for _ in range(501)
+        ]
+    )
+    session.commit()
+
+    first_session = Session(engine)
+    failing_session = Session(engine)
+    failing_session.exec = Mock(side_effect=RuntimeError("batch query failed"))
+    sessions = iter([first_session, failing_session])
+
+    batches = iter_execution_log_batches(lambda: next(sessions))
+
+    assert len(next(batches)) == 500
+    with pytest.raises(RuntimeError, match="batch query failed"):
+        next(batches)
