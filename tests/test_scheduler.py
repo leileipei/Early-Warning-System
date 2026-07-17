@@ -424,7 +424,7 @@ def test_worker_sync_rules_once_preserves_scheduler_when_database_read_fails():
     result = worker.sync_rules_once(synchronizer, session_factory=FailingSession)
 
     assert result == worker.RuleSyncResult(
-        ok=False, error="RuntimeError: worker synchronization failed"
+        ok=False, error="Worker 同步失败，请检查数据库连接和调度配置"
     )
     synchronizer.sync.assert_not_called()
 

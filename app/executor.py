@@ -1,9 +1,11 @@
+import logging
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from re import split
 from typing import Protocol
 
-from app.mailer import EmailMessage, MailSendResult, SmtpMailer
+from app.error_reporting import log_exception_safely, public_error_summary
+from app.mailer import EmailMessage, MailSendResult, SMTP_SEND_FAILURE, SmtpMailer
 from app.models import AlertRule, ExecutionStatus, SendMode
 from app.sql_client import SqlClient
 from app.template_renderer import render_per_row, render_summary
@@ -12,6 +14,10 @@ try:
     from app.sql_validator import validate_select_only_sql
 except ImportError:
     from app.sql_validator import validate_select_sql as validate_select_only_sql
+
+
+logger = logging.getLogger(__name__)
+SQL_QUERY_FAILURE = "SQL Server 查询失败，请检查数据源连接和查询配置"
 
 
 class CompatibleMailer(Protocol):
@@ -73,10 +79,11 @@ class RuleExecutor:
                 max_rows=_rule_max_rows(rule, self.max_rows),
             )
         except Exception as exc:
+            log_exception_safely(logger, "Rule SQL query failed", exc)
             return ExecutionResult(
                 status=ExecutionStatus.FAILED,
                 error_type=type(exc).__name__,
-                error_message=_exception_message(exc),
+                error_message=public_error_summary(exc, fallback=SQL_QUERY_FAILURE),
             )
 
         rows = query_result.rows
@@ -150,7 +157,11 @@ class RuleExecutor:
         try:
             result = self.mailer.send(message)
         except Exception as exc:
-            result = MailSendResult(success=False, error_message=_exception_message(exc))
+            log_exception_safely(logger, "Rule email send failed", exc)
+            result = MailSendResult(
+                success=False,
+                error_message=public_error_summary(exc, fallback=SMTP_SEND_FAILURE),
+            )
         return ExecutionMailResult(message=message, result=result)
 
     def _status_for_mail_results(self, mail_results: list[ExecutionMailResult]) -> ExecutionStatus:
@@ -167,7 +178,7 @@ class RuleExecutor:
             for mail_result in mail_results
             if not mail_result.result.success and mail_result.result.error_message
         ]
-        return "; ".join(errors) if errors else "one or more emails failed"
+        return SMTP_SEND_FAILURE if errors else "one or more emails failed"
 
 
 def _parse_recipients(value: str) -> list[str]:

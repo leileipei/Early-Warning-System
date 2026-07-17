@@ -54,7 +54,7 @@ def test_record_worker_sync_persists_sanitized_failure_summary(session):
     assert heartbeat is not None
     assert heartbeat.id == 1
     assert heartbeat.last_sync_ok is False
-    assert heartbeat.last_error == "RuntimeError: worker synchronization failed"
+    assert heartbeat.last_error == "Worker 同步失败，请检查数据库连接和调度配置"
     assert secret not in heartbeat.last_error
     assert len(heartbeat.last_error) <= 300
 
@@ -64,7 +64,7 @@ def test_summarize_worker_error_is_bounded_and_does_not_include_exception_messag
 
     summary = summarize_worker_error(ValueError(secret))
 
-    assert summary == "ValueError: worker synchronization failed"
+    assert summary == "Worker 同步失败，请检查数据库连接和调度配置"
     assert secret not in summary
     assert len(summary) <= 300
 

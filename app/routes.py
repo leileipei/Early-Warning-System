@@ -1,3 +1,4 @@
+import logging
 import json
 from urllib.parse import urlencode
 
@@ -18,6 +19,7 @@ from app.crypto import SecretCipher
 from app.dashboard import build_dashboard_context
 from app.execution_lock import RuleExecutionInProgressError
 from app.db import get_session
+from app.error_reporting import log_exception_safely, public_error_summary
 from app.execution_service import build_smtp_mailer, build_sql_client, execute_rule_by_id
 from app.log_service import (
     DEFAULT_PAGE_SIZE,
@@ -48,6 +50,12 @@ from app.web_security import ensure_csrf_token, require_csrf
 
 router = APIRouter(dependencies=[Depends(require_csrf)])
 templates = Jinja2Templates(directory=TEMPLATES_DIR)
+logger = logging.getLogger(__name__)
+
+SQL_SYNTAX_FAILURE = "SQL Server 语法检测失败，请检查服务器连接和查询语句"
+SQL_PREVIEW_FAILURE = "SQL 查询预览失败，请检查数据源连接和查询语句"
+SQL_CONNECTION_FAILURE = "SQL Server 连接失败，请检查服务器、端口、证书和账号配置"
+SMTP_TEST_FAILURE = "SMTP 测试发送失败，请检查服务器、端口、加密方式和账号配置"
 
 
 def _template_response(
@@ -1044,8 +1052,9 @@ def validate_rule_sql(
             timeout_seconds=data_source.connect_timeout_seconds,
         )
     except Exception as exc:
+        log_exception_safely(logger, "SQL Server syntax validation request failed", exc)
         return JSONResponse(
-            {"valid": False, "message": f"SQL Server 语法检测失败：{exc}"},
+            {"valid": False, "message": public_error_summary(exc, fallback=SQL_SYNTAX_FAILURE)},
             status_code=400,
         )
 
@@ -1111,8 +1120,9 @@ def preview_rule_sql(
             max_rows=5,
         )
     except Exception as exc:
+        log_exception_safely(logger, "SQL preview request failed", exc)
         return JSONResponse(
-            {"success": False, "message": f"预览失败：{exc}"},
+            {"success": False, "message": public_error_summary(exc, fallback=SQL_PREVIEW_FAILURE)},
             status_code=400,
         )
 
@@ -1453,10 +1463,9 @@ def test_sql_server_settings(
             max_rows=1,
         )
     except Exception as exc:
+        log_exception_safely(logger, "SQL Server connection test failed", exc)
         return _template_response(
-            request,
-            "settings.html",
-            _settings_context(request, admin, session, error=f"连接失败：{exc}"),
+            request, "settings.html", _settings_context(request, admin, session, error=SQL_CONNECTION_FAILURE),
             status_code=400,
         )
 
@@ -1789,6 +1798,7 @@ def test_smtp_settings(
     )
     result = build_smtp_mailer(smtp_config).send(message)
     if not result.success:
+        logger.error("SMTP test send failed: error_type=MailSendError")
         return _template_response(
             request,
             "settings.html",
@@ -1796,7 +1806,7 @@ def test_smtp_settings(
                 request,
                 admin,
                 session,
-                error=f"SMTP 测试发送失败：{result.error_message or '未知错误'}",
+                error=SMTP_TEST_FAILURE,
             ),
             status_code=400,
         )

@@ -430,7 +430,10 @@ def test_invalid_sql_fails_before_query_or_email():
 
 def test_sql_client_exception_fails():
     mailer = FakeMailer()
-    executor = RuleExecutor(sql_client=FakeSqlClient(error=RuntimeError("query timed out")), mailer=mailer)
+    executor = RuleExecutor(
+        sql_client=FakeSqlClient(error=RuntimeError("PWD=database-password Fernet=" + "e" * 43 + "=")),
+        mailer=mailer,
+    )
 
     result = executor.execute(make_rule())
 
@@ -438,7 +441,9 @@ def test_sql_client_exception_fails():
     assert result.row_count == 0
     assert result.mail_count == 0
     assert result.error_type == "RuntimeError"
-    assert result.error_message == "query timed out"
+    assert result.error_message == "SQL Server 查询失败，请检查数据源连接和查询配置"
+    assert "database-password" not in result.error_message
+    assert "e" * 43 + "=" not in result.error_message
     assert mailer.messages == []
 
 
@@ -450,7 +455,7 @@ def test_exception_without_message_records_error_type_as_message():
 
     assert result.status == ExecutionStatus.FAILED
     assert result.error_type == "RuntimeError"
-    assert result.error_message == "RuntimeError"
+    assert result.error_message == "SQL Server 查询失败，请检查数据源连接和查询配置"
 
 
 def test_template_error_fails_without_sending_email():
@@ -537,7 +542,7 @@ def test_mailer_exception_is_recorded_as_failed_send():
     assert len(result.mail_results) == 1
     assert result.mail_results[0].result == MailSendResult(
         success=False,
-        error_message="smtp unavailable",
+        error_message="SMTP 发送失败，请检查服务器、端口、加密方式和账号配置",
     )
 
 
@@ -592,7 +597,7 @@ def test_execute_rule_by_id_persists_failed_execution_when_sql_client_fails(monk
     assert execution_log.row_count == 0
     assert execution_log.email_count == 0
     assert execution_log.error_type == "RuntimeError"
-    assert execution_log.error_message == "query timed out（已重试 2 次）"
+    assert execution_log.error_message == "SQL Server 查询失败，请检查数据源连接和查询配置（已重试 2 次）"
     assert execution_log.duration_ms >= 0
     assert execution_log.finished_at is not None
     assert session.exec(select(MailLog)).all() == []
@@ -778,7 +783,7 @@ def test_execute_rule_by_id_persists_one_log_after_exhausting_retries(monkeypatc
     assert execution_logs == [execution_log]
     assert execution_log.status == ExecutionStatus.FAILED
     assert execution_log.error_type == "RuntimeError"
-    assert execution_log.error_message == "query timed out（已重试 2 次）"
+    assert execution_log.error_message == "SQL Server 查询失败，请检查数据源连接和查询配置（已重试 2 次）"
     assert len(sql_client.calls) == 3
     assert session.exec(select(MailLog)).all() == []
 
@@ -798,7 +803,7 @@ def test_execute_rule_by_id_persists_partial_mail_results(monkeypatch, session):
         lambda config: FakeMailer(
             results=[
                 MailSendResult(success=True),
-                MailSendResult(success=False, error_message="smtp rejected"),
+                MailSendResult(success=False, error_message="SMTP_PASSWORD=smtp-secret"),
             ]
         ),
     )
@@ -818,7 +823,7 @@ def test_execute_rule_by_id_persists_partial_mail_results(monkeypatch, session):
     assert [mail_log.status for mail_log in mail_logs] == [MailStatus.SUCCESS, MailStatus.FAILED]
     assert [mail_log.subject for mail_log in mail_logs] == ["预警 大额订单", "预警 大额订单"]
     assert mail_logs[0].recipients == "ops@example.com"
-    assert mail_logs[1].error_message == "smtp rejected"
+    assert mail_logs[1].error_message == "SMTP 发送失败，请检查服务器、端口、加密方式和账号配置"
     assert len(mail_logs) == 2
 
 
@@ -1073,7 +1078,7 @@ def test_execute_rule_by_id_persists_failed_log_when_builder_raises(monkeypatch,
     rule = persist_rule(session, data_source)
 
     def raise_builder_error(data_source):
-        raise RuntimeError("cannot decrypt")
+        raise RuntimeError("Fernet=" + "f" * 43 + "=")
 
     monkeypatch.setattr(execution_service, "build_sql_client", raise_builder_error)
 
@@ -1086,5 +1091,5 @@ def test_execute_rule_by_id_persists_failed_log_when_builder_raises(monkeypatch,
 
     assert execution_log.status == ExecutionStatus.FAILED
     assert execution_log.error_type == "RuntimeError"
-    assert execution_log.error_message == "cannot decrypt（已重试 2 次）"
+    assert execution_log.error_message == "规则执行失败，请检查数据源和 SMTP 配置（已重试 2 次）"
     assert session.exec(select(MailLog)).all() == []

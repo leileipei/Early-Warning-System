@@ -7,16 +7,18 @@ from uuid import uuid4
 from sqlmodel import Session, select
 
 from app.db import get_engine, init_db
+from app.error_reporting import log_exception_safely, public_error_summary
 from app.execution_lock import RuleExecutionInProgressError
 from app.execution_service import execute_rule_by_id
 from app.log_service import cleanup_expired_logs
 from app.models import AlertRule, TriggerType
 from app.scheduler import RuleScheduleSynchronizer, build_scheduler
 from app.settings import get_settings
-from app.worker_health import record_worker_start, record_worker_sync, summarize_worker_error
+from app.worker_health import record_worker_start, record_worker_sync
 
 
 logger = logging.getLogger(__name__)
+WORKER_SYNC_FAILURE = "Worker 同步失败，请检查数据库连接和调度配置"
 
 
 @dataclass(frozen=True)
@@ -51,14 +53,14 @@ def sync_rules_once(
         with factory() as session:
             rules = session.exec(select(AlertRule).where(AlertRule.archived_at.is_(None))).all()
     except Exception as exc:
-        active_logger.exception("读取预警规则失败，保留当前调度任务")
-        return RuleSyncResult(ok=False, error=summarize_worker_error(exc))
+        log_exception_safely(active_logger, "读取预警规则失败，保留当前调度任务", exc)
+        return RuleSyncResult(ok=False, error=public_error_summary(exc, fallback=WORKER_SYNC_FAILURE))
 
     try:
         synchronizer.sync(rules)
     except Exception as exc:
-        active_logger.exception("同步预警规则失败，保留当前调度任务")
-        return RuleSyncResult(ok=False, error=summarize_worker_error(exc))
+        log_exception_safely(active_logger, "同步预警规则失败，保留当前调度任务", exc)
+        return RuleSyncResult(ok=False, error=public_error_summary(exc, fallback=WORKER_SYNC_FAILURE))
     return RuleSyncResult(ok=True)
 
 
@@ -71,8 +73,8 @@ def _record_sync_heartbeat(
     try:
         with session_factory() as session:
             record_sync(session, worker_id, ok=result.ok, error=result.error)
-    except Exception:
-        logger.exception("记录 Worker 心跳失败")
+    except Exception as exc:
+        log_exception_safely(logger, "记录 Worker 心跳失败", exc)
 
 
 def _record_start_heartbeat(
@@ -81,15 +83,15 @@ def _record_start_heartbeat(
     try:
         with session_factory() as session:
             record_worker_start(session, worker_id)
-    except Exception:
-        logger.exception("记录 Worker 启动心跳失败")
+    except Exception as exc:
+        log_exception_safely(logger, "记录 Worker 启动心跳失败", exc)
 
 
 def _cleanup_logs_once(cleanup_logs: Callable[[], object]) -> None:
     try:
         cleanup_logs()
-    except Exception:
-        logger.exception("清理过期日志失败")
+    except Exception as exc:
+        log_exception_safely(logger, "清理过期日志失败", exc)
 
 
 def run_sync_loop(

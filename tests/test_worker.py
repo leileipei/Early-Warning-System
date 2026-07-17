@@ -50,15 +50,23 @@ def test_sync_rules_once_passes_only_active_rules_to_synchronizer(engine):
     assert [rule.id for rule in synced_rules] == [active_rule_id]
 
 
-def test_sync_rules_once_returns_failure_when_rule_reading_fails():
-    session_factory = Mock(side_effect=RuntimeError("database unavailable"))
-
-    result = worker.sync_rules_once(Mock(), session_factory=session_factory)
-
-    assert result == worker.RuleSyncResult(
-        ok=False, error="RuntimeError: worker synchronization failed"
+def test_sync_rules_once_returns_fixed_heartbeat_error_and_logs_redacted_traceback(caplog):
+    session_factory = Mock(
+        side_effect=RuntimeError(
+            "DRIVER={ODBC Driver 18 for SQL Server};SERVER={db.internal,1433};"
+            "UID={report_user};PWD={database-password};"
+        )
     )
 
+    with caplog.at_level("ERROR"):
+        result = worker.sync_rules_once(Mock(), session_factory=session_factory)
+
+    assert result == worker.RuleSyncResult(
+        ok=False, error="Worker 同步失败，请检查数据库连接和调度配置"
+    )
+    assert "error_type=RuntimeError" in caplog.text
+    for secret in ("db.internal", "report_user", "database-password"):
+        assert secret not in caplog.text
 
 def test_sync_rules_once_returns_failure_when_scheduler_sync_raises(engine):
     synchronizer = Mock()
@@ -67,7 +75,7 @@ def test_sync_rules_once_returns_failure_when_scheduler_sync_raises(engine):
     result = worker.sync_rules_once(synchronizer, session_factory=lambda: Session(engine))
 
     assert result == worker.RuleSyncResult(
-        ok=False, error="ValueError: worker synchronization failed"
+        ok=False, error="Worker 同步失败，请检查数据库连接和调度配置"
     )
 
 
@@ -111,7 +119,7 @@ def test_run_sync_loop_records_failed_sync_heartbeat(engine):
         session_factory=lambda: Session(engine),
         sync_once=Mock(
             return_value=worker.RuleSyncResult(
-                ok=False, error="RuntimeError: worker synchronization failed"
+                ok=False, error="Worker 同步失败，请检查数据库连接和调度配置"
             )
         ),
         sleep_fn=stop_after_initial_sync,
@@ -122,7 +130,7 @@ def test_run_sync_loop_records_failed_sync_heartbeat(engine):
 
     assert heartbeat is not None
     assert heartbeat.last_sync_ok is False
-    assert heartbeat.last_error == "RuntimeError: worker synchronization failed"
+    assert heartbeat.last_error == "Worker 同步失败，请检查数据库连接和调度配置"
     scheduler.start.assert_called_once()
 
 

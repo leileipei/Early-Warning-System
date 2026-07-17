@@ -1402,26 +1402,33 @@ def test_validate_rule_sql_rejects_missing_data_source(monkeypatch, session):
         get_settings.cache_clear()
 
 
-def test_validate_rule_sql_returns_sql_server_syntax_error(monkeypatch, session):
+def test_validate_rule_sql_returns_fixed_redacted_sql_server_syntax_error(monkeypatch, session, caplog):
     data_source = _create_data_source(session)
     routes = importlib.import_module("app.routes")
     monkeypatch.setattr(
         routes,
         "build_sql_client",
-        lambda source: FakeSyntaxSqlClient(error=RuntimeError("Incorrect syntax near 'from'")),
+        lambda source: FakeSyntaxSqlClient(
+            error=RuntimeError("PWD=database-password Fernet=" + "d" * 43 + "=")
+        ),
     )
     client, get_settings, app = _client_with_admin(monkeypatch, session)
     try:
-        response = client.post(
-            "/rules/validate-sql",
-            data={"data_source_id": str(data_source.id), "sql_text": "select from orders"},
-        )
+        with caplog.at_level("ERROR"):
+            response = client.post(
+                "/rules/validate-sql",
+                data={"data_source_id": str(data_source.id), "sql_text": "select from orders"},
+            )
 
         assert response.status_code == 400
         assert response.json() == {
             "valid": False,
-            "message": "SQL Server 语法检测失败：Incorrect syntax near 'from'",
+            "message": "SQL Server 语法检测失败，请检查服务器连接和查询语句",
         }
+        assert "database-password" not in response.text
+        assert "d" * 43 + "=" not in response.text
+        assert "database-password" not in caplog.text
+        assert "d" * 43 + "=" not in caplog.text
     finally:
         app.dependency_overrides.clear()
         get_settings.cache_clear()
@@ -1547,7 +1554,12 @@ def test_preview_rule_sql_reports_query_error(monkeypatch, session):
     monkeypatch.setattr(
         routes,
         "build_sql_client",
-        lambda source: FakeSyntaxSqlClient(error=RuntimeError("timeout expired")),
+        lambda source: FakeSyntaxSqlClient(
+            error=RuntimeError(
+                "DRIVER={ODBC Driver 18 for SQL Server};SERVER={db.internal,1433};"
+                "UID={report_user};PWD={database-password};"
+            )
+        ),
     )
     client, get_settings, app = _client_with_admin(monkeypatch, session)
     try:
@@ -1561,7 +1573,12 @@ def test_preview_rule_sql_reports_query_error(monkeypatch, session):
         )
 
         assert response.status_code == 400
-        assert response.json() == {"success": False, "message": "预览失败：timeout expired"}
+        assert response.json() == {
+            "success": False,
+            "message": "SQL 查询预览失败，请检查数据源连接和查询语句",
+        }
+        for secret in ("db.internal", "report_user", "database-password"):
+            assert secret not in response.text
     finally:
         app.dependency_overrides.clear()
         get_settings.cache_clear()
@@ -2240,14 +2257,15 @@ def test_test_sql_server_settings_reports_failure(monkeypatch, session):
     monkeypatch.setattr(
         routes,
         "build_sql_client",
-        lambda source: FakeSyntaxSqlClient(error=RuntimeError("login failed")),
+        lambda source: FakeSyntaxSqlClient(error=RuntimeError("PWD=database-password")),
     )
     client, get_settings, app = _client_with_admin(monkeypatch, session)
     try:
         response = client.post(f"/settings/sql-server/{data_source.id}/test")
 
         assert response.status_code == 400
-        assert "连接失败：login failed" in response.text
+        assert "SQL Server 连接失败，请检查服务器、端口、证书和账号配置" in response.text
+        assert "database-password" not in response.text
     finally:
         app.dependency_overrides.clear()
         get_settings.cache_clear()
@@ -2290,7 +2308,9 @@ def test_test_smtp_settings_reports_success(monkeypatch, session):
 
 def test_test_smtp_settings_reports_failure(monkeypatch, session):
     smtp_config = _create_smtp_config(session)
-    fake_mailer = FakeSmtpMailer(MailSendResult(success=False, error_message="auth failed"))
+    fake_mailer = FakeSmtpMailer(
+        MailSendResult(success=False, error_message="SMTP_PASSWORD=smtp-secret")
+    )
     routes = importlib.import_module("app.routes")
     monkeypatch.setattr(routes, "build_smtp_mailer", lambda config: fake_mailer)
     client, get_settings, app = _client_with_admin(monkeypatch, session)
@@ -2298,7 +2318,8 @@ def test_test_smtp_settings_reports_failure(monkeypatch, session):
         response = client.post(f"/settings/smtp/{smtp_config.id}/test")
 
         assert response.status_code == 400
-        assert "SMTP 测试发送失败：auth failed" in response.text
+        assert "SMTP 测试发送失败，请检查服务器、端口、加密方式和账号配置" in response.text
+        assert "smtp-secret" not in response.text
     finally:
         app.dependency_overrides.clear()
         get_settings.cache_clear()

@@ -90,8 +90,13 @@ def test_smtp_mailer_includes_cc_recipients_in_headers_and_smtp_recipients():
     assert mime["Cc"] == "lead@example.com, audit@example.com"
 
 
-def test_smtp_mailer_returns_failure_result_when_sendmail_raises():
-    fake = FailingSmtpClient()
+def test_smtp_mailer_returns_fixed_error_and_logs_redacted_failure(caplog):
+    class SensitiveFailingSmtpClient(FailingSmtpClient):
+        def sendmail(self, sender, recipients, body):
+            self.events.append("sendmail")
+            raise RuntimeError("SMTP_PASSWORD=smtp-secret Fernet=" + "c" * 43 + "=")
+
+    fake = SensitiveFailingSmtpClient()
     mailer = SmtpMailer(sender="alerts@example.com", client_factory=lambda: fake)
     message = EmailMessage(
         recipients=["ops@example.com"],
@@ -100,12 +105,16 @@ def test_smtp_mailer_returns_failure_result_when_sendmail_raises():
         html_body="<p>hello</p>",
     )
 
-    result = mailer.send(message)
+    with caplog.at_level("ERROR"):
+        result = mailer.send(message)
 
     assert result == MailSendResult(
         success=False,
-        error_message="smtp unavailable",
+        error_message="SMTP 发送失败，请检查服务器、端口、加密方式和账号配置",
     )
+    assert "error_type=RuntimeError" in caplog.text
+    assert "smtp-secret" not in caplog.text
+    assert "c" * 43 + "=" not in caplog.text
 
 
 def test_smtp_mailer_quits_client_after_successful_send():
@@ -124,7 +133,7 @@ def test_smtp_mailer_quits_client_after_successful_send():
     assert fake.events == ["sendmail", "quit"]
 
 
-def test_smtp_mailer_quits_client_after_sendmail_failure_and_preserves_sendmail_error():
+def test_smtp_mailer_quits_client_after_sendmail_failure():
     fake = FailingSmtpClient()
     mailer = SmtpMailer(sender="alerts@example.com", client_factory=lambda: fake)
     message = EmailMessage(
@@ -138,7 +147,7 @@ def test_smtp_mailer_quits_client_after_sendmail_failure_and_preserves_sendmail_
 
     assert result == MailSendResult(
         success=False,
-        error_message="smtp unavailable",
+        error_message="SMTP 发送失败，请检查服务器、端口、加密方式和账号配置",
     )
     assert fake.events == ["sendmail", "quit"]
 

@@ -1,6 +1,13 @@
+import logging
 from collections.abc import Callable
 from dataclasses import dataclass
 from email.message import EmailMessage as MimeEmailMessage
+
+from app.error_reporting import log_exception_safely, public_error_summary
+
+
+logger = logging.getLogger(__name__)
+SMTP_SEND_FAILURE = "SMTP 发送失败，请检查服务器、端口、加密方式和账号配置"
 
 
 @dataclass(frozen=True)
@@ -39,7 +46,11 @@ class SmtpMailer:
             client.sendmail(self.sender, all_recipients, mime.as_string())
             return MailSendResult(success=True)
         except Exception as exc:
-            return MailSendResult(success=False, error_message=str(exc))
+            log_exception_safely(logger, "SMTP send failed", exc)
+            return MailSendResult(
+                success=False,
+                error_message=public_error_summary(exc, fallback=SMTP_SEND_FAILURE),
+            )
         finally:
             if client is not None:
                 self._close_client(client)

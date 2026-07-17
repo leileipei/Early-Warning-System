@@ -1,3 +1,4 @@
+import logging
 import smtplib
 import ssl
 import time
@@ -7,9 +8,10 @@ from datetime import datetime, timedelta
 from sqlmodel import Session, select
 
 from app.crypto import SecretCipher
+from app.error_reporting import log_exception_safely, public_error_summary
 from app.execution_lock import rule_execution_lease
 from app.executor import ExecutionResult, RuleExecutor
-from app.mailer import SmtpMailer
+from app.mailer import SMTP_SEND_FAILURE, SmtpMailer
 from app.models import (
     AlertRule,
     AlertSuppression,
@@ -26,12 +28,18 @@ from app.settings import get_settings
 from app.sql_client import PyodbcSqlServerClient
 
 
+logger = logging.getLogger(__name__)
+
+
 class RuleNotFoundError(Exception):
     pass
 
 
 class ConfigurationError(Exception):
     pass
+
+
+RULE_EXECUTION_FAILURE = "规则执行失败，请检查数据源和 SMTP 配置"
 
 
 @dataclass(frozen=True)
@@ -160,11 +168,12 @@ def _execute_rule_once(
             )
         )
     except Exception as exc:
+        log_exception_safely(logger, "Rule execution setup failed", exc)
         return ExecutionAttempt(
             result=ExecutionResult(
                 status=ExecutionStatus.FAILED,
                 error_type=type(exc).__name__,
-                error_message=str(exc) or type(exc).__name__,
+                error_message=public_error_summary(exc, fallback=RULE_EXECUTION_FAILURE),
             )
         )
 
@@ -311,7 +320,7 @@ def _build_mail_log(execution_log_id: int, mail_result) -> MailLog:
         cc_recipients=",".join(mail_result.message.cc_recipients),
         subject=mail_result.message.subject,
         status=MailStatus.SUCCESS if mail_result.result.success else MailStatus.FAILED,
-        error_message=mail_result.result.error_message or "",
+        error_message="" if mail_result.result.success else SMTP_SEND_FAILURE,
     )
 
 

@@ -116,6 +116,31 @@ class FakePyodbc:
         return self.connection
 
 
+class FailingPyodbc:
+    def connect(self, connection_string):
+        raise ConnectionError(f"connection rejected: {connection_string}")
+
+
+def test_query_logs_redacted_connection_error_and_reraises_original_exception(monkeypatch, caplog):
+    monkeypatch.setitem(sys.modules, "pyodbc", FailingPyodbc())
+    client = PyodbcSqlServerClient(
+        host="db.internal",
+        port=1433,
+        database="warnings",
+        username="report_user",
+        password="database-password",
+        connect_timeout_seconds=5,
+    )
+
+    with caplog.at_level("ERROR"):
+        with pytest.raises(ConnectionError, match="connection rejected"):
+            client.query("select id from orders", timeout_seconds=7, max_rows=25)
+
+    assert "error_type=ConnectionError" in caplog.text
+    for secret in ("db.internal", "report_user", "database-password"):
+        assert secret not in caplog.text
+
+
 def test_query_executes_original_sql_limits_rows_with_fetchmany_and_sets_timeout(monkeypatch):
     cursor = FakePyodbcCursor()
     fake_pyodbc = FakePyodbc(FakePyodbcConnection(cursor))

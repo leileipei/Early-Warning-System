@@ -1,5 +1,11 @@
+import logging
 from dataclasses import dataclass
 from typing import Protocol
+
+from app.error_reporting import log_exception_safely
+
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -88,11 +94,15 @@ class PyodbcSqlServerClient:
             raise
 
         executable_sql = strip_single_trailing_semicolon(sql)
-        with pyodbc.connect(self.connection_string) as connection:
-            connection.timeout = timeout_seconds
-            cursor = connection.cursor()
-            cursor.execute(executable_sql)
-            return rows_from_cursor_limited(cursor, max_rows)
+        try:
+            with pyodbc.connect(self.connection_string) as connection:
+                connection.timeout = timeout_seconds
+                cursor = connection.cursor()
+                cursor.execute(executable_sql)
+                return rows_from_cursor_limited(cursor, max_rows)
+        except Exception as exc:
+            log_exception_safely(logger, "SQL Server query failed", exc)
+            raise
 
     def validate_syntax(self, sql: str, timeout_seconds: int) -> None:
         try:
@@ -104,7 +114,11 @@ class PyodbcSqlServerClient:
 
         executable_sql = strip_single_trailing_semicolon(sql)
         parse_only_batch = f"SET PARSEONLY ON;\n{executable_sql};\nSET PARSEONLY OFF;"
-        with pyodbc.connect(self.connection_string) as connection:
-            connection.timeout = timeout_seconds
-            cursor = connection.cursor()
-            cursor.execute(parse_only_batch)
+        try:
+            with pyodbc.connect(self.connection_string) as connection:
+                connection.timeout = timeout_seconds
+                cursor = connection.cursor()
+                cursor.execute(parse_only_batch)
+        except Exception as exc:
+            log_exception_safely(logger, "SQL Server syntax validation failed", exc)
+            raise
