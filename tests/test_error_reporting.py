@@ -1,3 +1,4 @@
+import json
 import logging
 
 import pytest
@@ -133,6 +134,75 @@ def test_redact_sensitive_text_consumes_complete_nested_mapping_values(
     for secret in secrets:
         assert secret not in rendered
     assert preserved in rendered
+
+
+@pytest.mark.parametrize(
+    ("value", "secrets", "preserved"),
+    [
+        (
+            json.dumps(
+                {
+                    "password": {
+                        "value": "pretty-secret",
+                        "items": ["pretty-list-secret", {"deep": "pretty-deep-secret"}],
+                    },
+                    "safe": "keep-pretty",
+                },
+                indent=2,
+            ),
+            ("pretty-secret", "pretty-list-secret", "pretty-deep-secret"),
+            '"safe": "keep-pretty"',
+        ),
+        (
+            "{\n"
+            "  'secret':\n"
+            "  {\n"
+            "    'items': [\n"
+            "      {'value': 'colon-newline-secret'},\n"
+            "      'colon-newline-list-secret'\n"
+            "    ]\n"
+            "  },\n"
+            "  'safe': 'keep-colon-newline'\n"
+            "}",
+            ("colon-newline-secret", "colon-newline-list-secret"),
+            "'safe': 'keep-colon-newline'",
+        ),
+        (
+            "{\n"
+            "  'session_secret'\n"
+            "  :\n"
+            "  [\n"
+            "    {'value': 'split-key-secret'},\n"
+            "    ['split-key-list-secret']\n"
+            "  ],\n"
+            "  'safe': 'keep-split-key'\n"
+            "}",
+            ("split-key-secret", "split-key-list-secret"),
+            "'safe': 'keep-split-key'",
+        ),
+    ],
+)
+def test_redact_sensitive_text_handles_multiline_mapping_whitespace(
+    value, secrets, preserved
+):
+    rendered = redact_sensitive_text(value)
+
+    for secret in secrets:
+        assert secret not in rendered
+    assert preserved in rendered
+
+
+def test_redact_sensitive_text_fails_closed_for_unterminated_multiline_structure():
+    rendered = redact_sensitive_text(
+        "{\n"
+        '  "password": {\n'
+        '    "items": ["multiline-open-secret", {"deep": "multiline-tail-secret"}]\n'
+        '  "safe": "keep-after-multiline-unclosed"'
+    )
+
+    assert "multiline-open-secret" not in rendered
+    assert "multiline-tail-secret" not in rendered
+    assert '"safe": "keep-after-multiline-unclosed"' in rendered
 
 
 @pytest.mark.parametrize(

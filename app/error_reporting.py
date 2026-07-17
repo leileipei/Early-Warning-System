@@ -24,7 +24,7 @@ SENSITIVE_ASSIGNMENT = re.compile(
 )
 SENSITIVE_MAPPING_KEY = re.compile(
     rf"(?i)(?<![A-Za-z0-9_])(?P<quote>['\"]?)(?P<key>{_SENSITIVE_FIELD_NAME})"
-    rf"(?![A-Za-z0-9_])(?P=quote)[ \t]*:[ \t]*"
+    rf"(?![A-Za-z0-9_])(?P=quote)"
 )
 ODBC_SENSITIVE_ASSIGNMENT = re.compile(
     r"(?i)\b(server|data\s+source|uid|user\s*id|database|initial\s+catalog|pwd|password)"
@@ -34,26 +34,54 @@ FERNET_VALUE = re.compile(r"(?<![A-Za-z0-9_-])[A-Za-z0-9_-]{43}=(?![A-Za-z0-9_-]
 ODBC_CONNECTION_STRING = re.compile(r"(?i)\bDRIVER=\{[^\r\n]*")
 _STRUCTURED_VALUE_SCAN_LIMIT = 32_768
 _STRUCTURED_VALUE_DEPTH_LIMIT = 64
+_MAPPING_WHITESPACE = " \t\r\n"
+_MAPPING_ENTRY_LINE = re.compile(
+    r"(?m)^(?P<indent>[ \t]*)(?:"
+    r'"(?:\\.|[^"\\\r\n])+"|'
+    r"'(?:\\.|[^'\\\r\n])+'|"
+    r"[A-Za-z_][A-Za-z0-9_-]*)[ \t]*:"
+)
 
 
-def _line_end(text: str, start: int) -> int:
-    ends = [position for marker in ("\r", "\n") if (position := text.find(marker, start)) >= 0]
-    return min(ends, default=len(text))
+def _mapping_value_start(text: str, key_end: int, scan_end: int) -> int | None:
+    position = key_end
+    while position < scan_end and text[position] in _MAPPING_WHITESPACE:
+        position += 1
+    if position >= scan_end or text[position] != ":":
+        return None
 
-
-def _consume_trailing_fragment(text: str, start: int, end: int) -> int:
-    position = start
-    while position < end and text[position] not in ",}]":
+    position += 1
+    while position < scan_end and text[position] in _MAPPING_WHITESPACE:
         position += 1
     return position
 
 
-def _structured_value_end(text: str, start: int) -> int:
-    line_end = _line_end(text, start)
-    if start >= line_end:
-        return start
+def _mapping_key_indent(text: str, key_start: int) -> int:
+    line_start = max(text.rfind("\n", 0, key_start), text.rfind("\r", 0, key_start)) + 1
+    position = line_start
+    while position < key_start and text[position] in " \t":
+        position += 1
+    return len(text[line_start:position].expandtabs(4))
 
-    scan_end = min(line_end, start + _STRUCTURED_VALUE_SCAN_LIMIT)
+
+def _unterminated_value_end(text: str, start: int, scan_end: int, key_indent: int) -> int:
+    for match in _MAPPING_ENTRY_LINE.finditer(text, start, scan_end):
+        if match.start() > start and len(match.group("indent").expandtabs(4)) <= key_indent:
+            return match.start()
+    return len(text)
+
+
+def _consume_trailing_fragment(text: str, start: int, end: int) -> int:
+    position = start
+    while position < end and text[position] not in ",}]\r\n":
+        position += 1
+    return position
+
+
+def _structured_value_end(text: str, start: int, scan_end: int, key_indent: int) -> int:
+    if start >= scan_end:
+        return len(text)
+
     first = text[start]
     if first in "[{":
         closing_for = {"[": "]", "{": "}"}
@@ -64,6 +92,8 @@ def _structured_value_end(text: str, start: int) -> int:
         while position < scan_end:
             character = text[position]
             if quote:
+                if character in "\r\n":
+                    return _unterminated_value_end(text, start, scan_end, key_indent)
                 if escaped:
                     escaped = False
                 elif character == "\\":
@@ -74,16 +104,16 @@ def _structured_value_end(text: str, start: int) -> int:
                 quote = character
             elif character in closing_for:
                 if len(stack) >= _STRUCTURED_VALUE_DEPTH_LIMIT:
-                    return line_end
+                    return _unterminated_value_end(text, start, scan_end, key_indent)
                 stack.append(closing_for[character])
             elif character in "]}":
                 if character != stack[-1]:
-                    return line_end
+                    return _unterminated_value_end(text, start, scan_end, key_indent)
                 stack.pop()
                 if not stack:
-                    return _consume_trailing_fragment(text, position + 1, line_end)
+                    return _consume_trailing_fragment(text, position + 1, scan_end)
             position += 1
-        return line_end
+        return _unterminated_value_end(text, start, scan_end, key_indent)
 
     if first in "'\"":
         quote = first
@@ -91,30 +121,45 @@ def _structured_value_end(text: str, start: int) -> int:
         position = start + 1
         while position < scan_end:
             character = text[position]
+            if character in "\r\n":
+                return _unterminated_value_end(text, start, scan_end, key_indent)
             if escaped:
                 escaped = False
             elif character == "\\":
                 escaped = True
             elif character == quote:
-                return _consume_trailing_fragment(text, position + 1, line_end)
+                return _consume_trailing_fragment(text, position + 1, scan_end)
             position += 1
-        return line_end
+        return _unterminated_value_end(text, start, scan_end, key_indent)
 
     position = start
     while position < scan_end and text[position] not in ",}]":
         position += 1
-    return position if position < scan_end else line_end
+    if position < scan_end:
+        return position
+    return _unterminated_value_end(text, start, scan_end, key_indent)
 
 
 def _redact_sensitive_mapping_values(text: str) -> str:
     rendered: list[str] = []
     cursor = 0
-    while match := SENSITIVE_MAPPING_KEY.search(text, cursor):
-        value_start = match.end()
-        value_end = _structured_value_end(text, value_start)
+    search_position = 0
+    while match := SENSITIVE_MAPPING_KEY.search(text, search_position):
+        scan_end = min(len(text), match.start() + _STRUCTURED_VALUE_SCAN_LIMIT)
+        value_start = _mapping_value_start(text, match.end(), scan_end)
+        if value_start is None:
+            search_position = match.end()
+            continue
+        value_end = _structured_value_end(
+            text,
+            value_start,
+            scan_end,
+            _mapping_key_indent(text, match.start()),
+        )
         rendered.append(text[cursor:value_start])
         rendered.append("[REDACTED]")
         cursor = max(value_end, value_start)
+        search_position = cursor
     rendered.append(text[cursor:])
     return "".join(rendered)
 
