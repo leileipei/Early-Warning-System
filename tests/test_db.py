@@ -9,6 +9,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, SQLModel, select
 
 from app.models import (
+    AdminUser,
     AlertRule,
     AlertSuppression,
     AlertRuleVersion,
@@ -86,6 +87,44 @@ def test_init_db_creates_model_tables(engine):
         "executionlog",
         "maillog",
     } <= table_names
+
+
+def test_init_db_adds_session_version_to_existing_admin_user_table(tmp_path):
+    from app.db import create_db_engine, init_db
+
+    database_path = tmp_path / "legacy-admin.sqlite3"
+    engine = create_db_engine(f"sqlite:///{database_path}")
+    with engine.begin() as connection:
+        connection.execute(
+            text(
+                """
+                CREATE TABLE adminuser (
+                    id INTEGER PRIMARY KEY,
+                    username VARCHAR NOT NULL,
+                    password_hash VARCHAR NOT NULL,
+                    created_at DATETIME NOT NULL
+                )
+                """
+            )
+        )
+        connection.execute(
+            text(
+                """
+                INSERT INTO adminuser (id, username, password_hash, created_at)
+                VALUES (1, 'admin', 'legacy-hash', '2026-01-01 00:00:00')
+                """
+            )
+        )
+
+    init_db(engine)
+    init_db(engine)
+
+    columns = {column["name"] for column in inspect(engine).get_columns("adminuser")}
+    assert "session_version" in columns
+    with Session(engine) as session:
+        user = session.get(AdminUser, 1)
+        assert user is not None
+        assert user.session_version == 1
 
 
 def test_init_db_creates_rule_execution_lease_table(engine):

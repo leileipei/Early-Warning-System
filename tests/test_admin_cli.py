@@ -20,16 +20,19 @@ def test_upsert_admin_user_creates_admin(session):
 
     saved = session.exec(select(AdminUser).where(AdminUser.username == "admin")).one()
     assert saved.id == user.id
+    assert saved.session_version == 1
     assert verify_password("initial-password", saved.password_hash)
 
 
 def test_upsert_admin_user_updates_existing_password(session):
     first = upsert_admin_user(session, "admin", "initial-password")
+    first_session_version = first.session_version
 
     second = upsert_admin_user(session, "admin", "new-password")
 
     users = session.exec(select(AdminUser)).all()
     assert len(users) == 1
     assert second.id == first.id
+    assert second.session_version == first_session_version + 1
     assert verify_password("new-password", users[0].password_hash)
     assert not verify_password("initial-password", users[0].password_hash)

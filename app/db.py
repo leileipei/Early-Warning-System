@@ -91,6 +91,15 @@ def migrate_sqlite_schema(bind: Engine | Connection) -> None:
 def _migrate_sqlite_schema(connection: Connection) -> None:
     inspector = inspect(connection)
     table_names = set(inspector.get_table_names())
+    if "adminuser" in table_names:
+        existing_admin_columns = {
+            column["name"] for column in inspector.get_columns("adminuser")
+        }
+        if "session_version" not in existing_admin_columns:
+            connection.exec_driver_sql(
+                "ALTER TABLE adminuser ADD COLUMN session_version INTEGER NOT NULL DEFAULT 1"
+            )
+
     if "sqldatasource" in table_names:
         existing_columns = {
             column["name"] for column in inspector.get_columns("sqldatasource")

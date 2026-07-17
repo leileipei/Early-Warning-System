@@ -16,6 +16,7 @@ def upsert_admin_user(session: Session, username: str, password: str) -> AdminUs
         session.add(user)
     else:
         user.password_hash = password_hash
+        user.session_version += 1
         session.add(user)
     session.commit()
     session.refresh(user)

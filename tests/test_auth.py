@@ -1,7 +1,11 @@
 import importlib
+import json
 import re
 import time
+from base64 import b64decode
 from concurrent.futures import ThreadPoolExecutor
+from datetime import UTC, datetime, timedelta
+from types import SimpleNamespace
 from threading import Barrier, Lock
 
 import pytest
@@ -11,7 +15,9 @@ from fastapi.testclient import TestClient
 from sqlalchemy.pool import StaticPool
 from sqlmodel import Session, SQLModel, create_engine
 
+import app.auth as auth
 from app.auth import require_admin
+from app.admin_cli import upsert_admin_user
 from app.crypto import SecretCipher
 from app.db import get_session
 from app.models import AdminUser
@@ -98,6 +104,14 @@ def _csrf_post(client: TestClient, path: str, *, data=None, **kwargs):
     return client.post(path, data=payload, **kwargs)
 
 
+def _session_data(client: TestClient) -> dict[str, object]:
+    encoded = client.cookies.get("session")
+    assert encoded is not None
+    payload = encoded.split(".", 1)[0]
+    padding = "=" * (-len(payload) % 4)
+    return json.loads(b64decode(payload + padding))
+
+
 class FakeClock:
     def __init__(self):
         self.now = 1000.0
@@ -164,7 +178,7 @@ def test_secret_cipher_round_trip():
 
 
 def test_login_success_sets_admin_session(auth_app, auth_engine):
-    _create_admin_user(auth_engine)
+    user_id = _create_admin_user(auth_engine)
     client = TestClient(auth_app)
 
     response = _csrf_post(
@@ -176,6 +190,11 @@ def test_login_success_sets_admin_session(auth_app, auth_engine):
 
     assert response.status_code == 303
     assert response.headers["location"] == "/"
+    session_data = _session_data(client)
+    assert session_data["admin_user_id"] == user_id
+    assert isinstance(session_data["authenticated_at"], int)
+    assert session_data["last_activity_at"] == session_data["authenticated_at"]
+    assert session_data["admin_session_version"] == 1
     protected_response = client.get("/protected-test-route")
     assert protected_response.status_code == 200
     assert protected_response.json() == {"username": "admin"}
@@ -230,6 +249,126 @@ def test_require_admin_rejects_session_for_missing_user(auth_app, auth_engine):
     response = client.get("/protected-test-route")
 
     assert response.status_code == 401
+    assert "session=null" in response.headers["set-cookie"]
+
+
+def test_password_update_invalidates_existing_admin_session(auth_app, auth_engine):
+    _create_admin_user(auth_engine)
+    client = TestClient(auth_app)
+    login_response = _csrf_post(
+        client,
+        "/login",
+        data={"username": "admin", "password": "correct-password"},
+        follow_redirects=False,
+    )
+    assert login_response.status_code == 303
+    with Session(auth_engine) as session:
+        upsert_admin_user(session, "admin", "replacement-password")
+
+    response = client.get("/protected-test-route")
+
+    assert response.status_code == 401
+    assert "session=null" in response.headers["set-cookie"]
+
+
+def test_session_cookie_max_age_matches_session_absolute_timeout(auth_app):
+    client = TestClient(auth_app)
+
+    response = client.get("/login")
+
+    assert "Max-Age=28800" in response.headers["set-cookie"]
+
+
+def test_validate_admin_session_refreshes_last_activity_at():
+    user = AdminUser(id=7, username="admin", password_hash="hash", session_version=3)
+    authenticated_at = datetime(2026, 1, 1, tzinfo=UTC)
+    request = SimpleNamespace(
+        session={
+            "admin_user_id": 7,
+            "authenticated_at": int(authenticated_at.timestamp()),
+            "last_activity_at": int(authenticated_at.timestamp()),
+            "admin_session_version": 3,
+        }
+    )
+    now = authenticated_at + timedelta(minutes=10)
+
+    assert auth.validate_admin_session(
+        request,
+        user,
+        max_age_seconds=28_800,
+        idle_timeout_seconds=1_800,
+        now=now,
+    )
+    assert request.session["last_activity_at"] == int(now.timestamp())
+
+
+@pytest.mark.parametrize(
+    "session_update, now_offset",
+    [
+        ({"admin_user_id": "7"}, 0),
+        ({"authenticated_at": "invalid"}, 0),
+        ({"last_activity_at": True}, 0),
+        ({"admin_session_version": True}, 0),
+        ({"authenticated_at": 1_001, "last_activity_at": 1_001}, 0),
+        ({"last_activity_at": 999}, 0),
+        ({}, 28_800),
+        ({}, 1_800),
+        ({"admin_user_id": 8}, 0),
+        ({"admin_session_version": 4}, 0),
+    ],
+    ids=[
+        "invalid-user-id-type",
+        "invalid-time-type",
+        "boolean-time-type",
+        "boolean-session-version-type",
+        "future-time",
+        "backward-activity-time",
+        "absolute-timeout",
+        "idle-timeout",
+        "different-user",
+        "different-session-version",
+    ],
+)
+def test_validate_admin_session_clears_invalid_or_expired_session(session_update, now_offset):
+    user = AdminUser(id=7, username="admin", password_hash="hash", session_version=3)
+    request = SimpleNamespace(
+        session={
+            "admin_user_id": 7,
+            "authenticated_at": 1_000,
+            "last_activity_at": 1_000,
+            "admin_session_version": 3,
+        }
+    )
+    request.session.update(session_update)
+
+    assert not auth.validate_admin_session(
+        request,
+        user,
+        max_age_seconds=28_800,
+        idle_timeout_seconds=1_800,
+        now=datetime.fromtimestamp(1_000 + now_offset, UTC),
+    )
+    assert request.session == {}
+
+
+def test_validate_admin_session_clears_missing_session_field():
+    user = AdminUser(id=7, username="admin", password_hash="hash", session_version=3)
+    request = SimpleNamespace(
+        session={
+            "admin_user_id": 7,
+            "authenticated_at": 1_000,
+            "last_activity_at": 1_000,
+        }
+    )
+
+    assert not auth.validate_admin_session(
+        request,
+        user,
+        max_age_seconds=28_800,
+        idle_timeout_seconds=1_800,
+        now=datetime.fromtimestamp(1_001, UTC),
+    )
+    assert request.session == {}
 
 
 def test_login_rejects_missing_csrf_token(auth_app):

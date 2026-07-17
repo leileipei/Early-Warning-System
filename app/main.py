@@ -26,6 +26,7 @@ def create_app() -> FastAPI:
         secret_key=settings.session_secret,
         https_only=settings.session_cookie_secure,
         same_site="lax",
+        max_age=settings.session_max_age_seconds,
     )
     app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
     app.include_router(auth_router)
