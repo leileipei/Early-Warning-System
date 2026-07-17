@@ -54,6 +54,28 @@ def test_redact_sensitive_text_consumes_escaped_quoted_and_odbc_braced_values():
         assert secret not in rendered
 
 
+def test_redact_sensitive_text_fails_closed_for_unterminated_values_and_odbc_aliases():
+    rendered = redact_sensitive_text(
+        'SMTP_PASSWORD="alpha UNTERMINATED_TAIL\n'
+        "unrelated=keep\n"
+        "UID={alpha;beta}}UNTERMINATED_UID_TAIL\n"
+        "unrelated_next=keep2\n"
+        "DATA SOURCE=odbc-host; INITIAL CATALOG=odbc-database;"
+    )
+
+    for secret in (
+        "alpha",
+        "beta",
+        "UNTERMINATED_TAIL",
+        "UNTERMINATED_UID_TAIL",
+        "odbc-host",
+        "odbc-database",
+    ):
+        assert secret not in rendered
+    assert "unrelated=keep" in rendered
+    assert "unrelated_next=keep2" in rendered
+
+
 def test_log_exception_safely_keeps_a_bounded_redacted_traceback(caplog):
     logger = logging.getLogger("tests.error_reporting")
     fernet_key = "b" * 43 + "="

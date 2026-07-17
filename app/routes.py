@@ -19,7 +19,7 @@ from app.crypto import SecretCipher
 from app.dashboard import build_dashboard_context
 from app.execution_lock import RuleExecutionInProgressError
 from app.db import get_session
-from app.error_reporting import log_exception_safely, public_error_summary
+from app.error_reporting import log_exception_safely, log_failure_safely, public_error_summary
 from app.execution_service import build_smtp_mailer, build_sql_client, execute_rule_by_id
 from app.log_service import (
     DEFAULT_PAGE_SIZE,
@@ -1823,9 +1823,10 @@ def test_smtp_settings(
             status_code=400,
         )
     if not result.success:
-        logger.error(
-            "SMTP test send failed: smtp_config_id=%s; operation=smtp_test_send; error_type=MailSendError",
-            smtp_config.id,
+        log_failure_safely(
+            logger,
+            f"SMTP test send failed: smtp_config_id={smtp_config.id}; operation=smtp_test_send",
+            error_type="MailSendError",
         )
         return _template_response(
             request,

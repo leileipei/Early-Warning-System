@@ -2307,7 +2307,7 @@ def test_test_smtp_settings_reports_success(monkeypatch, session):
         get_settings.cache_clear()
 
 
-def test_test_smtp_settings_reports_failure(monkeypatch, session):
+def test_test_smtp_settings_reports_failure_with_distinct_safe_event_ids(monkeypatch, session, caplog):
     smtp_config = _create_smtp_config(session)
     fake_mailer = FakeSmtpMailer(
         MailSendResult(success=False, error_message="SMTP_PASSWORD=smtp-secret")
@@ -2316,11 +2316,20 @@ def test_test_smtp_settings_reports_failure(monkeypatch, session):
     monkeypatch.setattr(routes, "build_smtp_mailer", lambda config: fake_mailer)
     client, get_settings, app = _client_with_admin(monkeypatch, session)
     try:
-        response = client.post(f"/settings/smtp/{smtp_config.id}/test")
+        with caplog.at_level("ERROR"):
+            response = client.post(f"/settings/smtp/{smtp_config.id}/test")
+            second_response = client.post(f"/settings/smtp/{smtp_config.id}/test")
 
         assert response.status_code == 400
+        assert second_response.status_code == 400
         assert "SMTP 测试发送失败，请检查服务器、端口、加密方式和账号配置" in response.text
         assert "smtp-secret" not in response.text
+        event_ids = re.findall(r"error_id=([0-9a-f]{32})", caplog.text)
+        assert len(event_ids) == 2
+        assert event_ids[0] != event_ids[1]
+        assert f"smtp_config_id={smtp_config.id}" in caplog.text
+        assert "error_type=MailSendError" in caplog.text
+        assert "smtp-secret" not in caplog.text
     finally:
         app.dependency_overrides.clear()
         get_settings.cache_clear()

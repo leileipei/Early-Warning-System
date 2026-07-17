@@ -6,16 +6,21 @@ from uuid import uuid4
 
 _DOUBLE_QUOTED_VALUE = r'"(?:\\.|[^"\\])*"'
 _SINGLE_QUOTED_VALUE = r"'(?:\\.|[^'\\])*'"
-_ODBC_BRACED_VALUE = r"\{(?:}}|[^}])*\}"
+_ODBC_BRACED_VALUE = r"\{(?:}}|[^}])*\}(?!})"
+_UNTERMINATED_DOUBLE_QUOTED_VALUE = r'"[^\r\n]*'
+_UNTERMINATED_SINGLE_QUOTED_VALUE = r"'[^\r\n]*"
+_UNTERMINATED_ODBC_BRACED_VALUE = r"\{[^\r\n]*"
 _ASSIGNMENT_VALUE = (
-    rf"(?:{_DOUBLE_QUOTED_VALUE}|{_SINGLE_QUOTED_VALUE}|{_ODBC_BRACED_VALUE}|[^;\s]+)"
+    rf"(?:{_DOUBLE_QUOTED_VALUE}|{_SINGLE_QUOTED_VALUE}|{_ODBC_BRACED_VALUE}|"
+    rf"{_UNTERMINATED_DOUBLE_QUOTED_VALUE}|{_UNTERMINATED_SINGLE_QUOTED_VALUE}|"
+    rf"{_UNTERMINATED_ODBC_BRACED_VALUE}|[^;\s]+)"
 )
 SENSITIVE_ASSIGNMENT = re.compile(
     r"(?i)\b((?:[A-Za-z0-9]+_)*(?:pwd|password|secret|secret_key|session_secret))"
     rf"\s*=\s*{_ASSIGNMENT_VALUE}"
 )
 ODBC_SENSITIVE_ASSIGNMENT = re.compile(
-    r"(?i)\b(server|uid|user\s*id|database|pwd|password)"
+    r"(?i)\b(server|data\s+source|uid|user\s*id|database|initial\s+catalog|pwd|password)"
     rf"\s*=\s*{_ASSIGNMENT_VALUE}"
 )
 FERNET_VALUE = re.compile(r"(?<![A-Za-z0-9_-])[A-Za-z0-9_-]{43}=(?![A-Za-z0-9_-])")
@@ -33,6 +38,15 @@ def redact_sensitive_text(value: object, *, limit: int = 300) -> str:
 def public_error_summary(exc: BaseException, *, fallback: str) -> str:
     _ = exc
     return fallback
+
+
+def log_failure_safely(logger: logging.Logger, message: str, *, error_type: str) -> None:
+    logger.error(
+        "%s: error_id=%s; error_type=%s",
+        redact_sensitive_text(message),
+        uuid4().hex,
+        error_type,
+    )
 
 
 def log_exception_safely(logger: logging.Logger, message: str, exc: BaseException) -> None:
