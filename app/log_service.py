@@ -6,7 +6,7 @@ from datetime import datetime, timedelta
 from math import ceil
 from typing import Generic, TypeVar
 
-from sqlalchemy import delete, func, or_
+from sqlalchemy import and_, delete, func, or_
 from sqlmodel import Session, select
 
 from app.models import (
@@ -76,6 +76,8 @@ def iter_execution_log_batches(
         session_factory,
         select(ExecutionLog),
         ExecutionLog.started_at.desc(),
+        ExecutionLog.started_at,
+        ExecutionLog.id,
     )
 
 
@@ -84,24 +86,45 @@ def iter_mail_log_batches(session_factory: Callable[[], Session]) -> Iterator[li
         session_factory,
         select(MailLog),
         MailLog.sent_at.desc(),
+        MailLog.sent_at,
+        MailLog.id,
     )
 
 
 def _iter_log_batches(
-    session_factory: Callable[[], Session], statement, order_by
+    session_factory: Callable[[], Session],
+    statement,
+    order_by,
+    timestamp_column,
+    id_column,
 ) -> Iterator[list]:
-    offset = 0
+    with session_factory() as session:
+        max_id = next(iter(session.exec(select(func.max(id_column)))), None)
+    if max_id is None:
+        return
+
+    cursor_timestamp = None
+    cursor_id = None
     while True:
+        batch_statement = statement.where(id_column <= max_id)
+        if cursor_timestamp is not None:
+            batch_statement = batch_statement.where(
+                or_(
+                    timestamp_column < cursor_timestamp,
+                    and_(timestamp_column == cursor_timestamp, id_column < cursor_id),
+                )
+            )
         with session_factory() as session:
             batch = list(
                 session.exec(
-                    statement.order_by(order_by).offset(offset).limit(CSV_EXPORT_BATCH_SIZE)
+                    batch_statement.order_by(order_by, id_column.desc()).limit(CSV_EXPORT_BATCH_SIZE)
                 )
             )
         if not batch:
             return
         yield batch
-        offset += len(batch)
+        cursor_timestamp = getattr(batch[-1], timestamp_column.key)
+        cursor_id = batch[-1].id
 
 
 def list_execution_logs(

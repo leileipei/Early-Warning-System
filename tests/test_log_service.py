@@ -9,6 +9,7 @@ from app.models import (
     ExecutionLog,
     ExecutionStatus,
     MailLog,
+    MailStatus,
     SendMode,
     SqlDataSource,
     TriggerType,
@@ -348,13 +349,109 @@ def test_execution_log_batches_reraise_query_errors_while_streaming(session, eng
     )
     session.commit()
 
+    snapshot_session = Session(engine)
     first_session = Session(engine)
     failing_session = Session(engine)
     failing_session.exec = Mock(side_effect=RuntimeError("batch query failed"))
-    sessions = iter([first_session, failing_session])
+    sessions = iter([snapshot_session, first_session, failing_session])
 
     batches = iter_execution_log_batches(lambda: next(sessions))
 
     assert len(next(batches)) == 500
     with pytest.raises(RuntimeError, match="batch query failed"):
         next(batches)
+
+
+def test_execution_log_batches_use_a_stable_snapshot_across_concurrent_changes(
+    session, engine
+):
+    from app.log_service import iter_execution_log_batches
+
+    rule = _create_rule(session)
+    started_at = utc_now()
+    logs = [
+        ExecutionLog(
+            rule_id=rule.id,
+            trigger_type=TriggerType.MANUAL,
+            started_at=started_at - timedelta(seconds=index // 2),
+        )
+        for index in range(1001)
+    ]
+    session.add_all(logs)
+    session.commit()
+    expected_ids = [
+        log.id
+        for log in sorted(logs, key=lambda log: (log.started_at, log.id), reverse=True)
+    ]
+
+    batches = iter_execution_log_batches(lambda: Session(engine))
+    first_batch = next(batches)
+
+    assert [log.id for log in first_batch] == expected_ids[:500]
+    with Session(engine) as mutation_session:
+        inserted_log = ExecutionLog(
+            rule_id=rule.id,
+            trigger_type=TriggerType.MANUAL,
+            started_at=started_at - timedelta(seconds=350),
+        )
+        mutation_session.add(inserted_log)
+        mutation_session.delete(mutation_session.get(ExecutionLog, first_batch[0].id))
+        mutation_session.commit()
+        inserted_id = inserted_log.id
+
+    exported_ids = [log.id for log in first_batch]
+    exported_ids.extend(log.id for batch in batches for log in batch)
+
+    assert exported_ids == expected_ids
+    assert inserted_id not in exported_ids
+    assert len(exported_ids) == len(set(exported_ids))
+
+
+def test_mail_log_batches_use_a_stable_snapshot_across_concurrent_changes(session, engine):
+    from app.log_service import iter_mail_log_batches
+
+    rule = _create_rule(session)
+    execution_log = ExecutionLog(rule_id=rule.id, trigger_type=TriggerType.MANUAL)
+    session.add(execution_log)
+    session.commit()
+    session.refresh(execution_log)
+    sent_at = utc_now()
+    logs = [
+        MailLog(
+            execution_log_id=execution_log.id,
+            recipients="ops@example.com",
+            subject=f"mail-{index}",
+            status=MailStatus.SUCCESS,
+            sent_at=sent_at - timedelta(seconds=index // 2),
+        )
+        for index in range(1001)
+    ]
+    session.add_all(logs)
+    session.commit()
+    expected_ids = [
+        log.id for log in sorted(logs, key=lambda log: (log.sent_at, log.id), reverse=True)
+    ]
+
+    batches = iter_mail_log_batches(lambda: Session(engine))
+    first_batch = next(batches)
+
+    assert [log.id for log in first_batch] == expected_ids[:500]
+    with Session(engine) as mutation_session:
+        inserted_log = MailLog(
+            execution_log_id=execution_log.id,
+            recipients="ops@example.com",
+            subject="inserted-during-export",
+            status=MailStatus.SUCCESS,
+            sent_at=sent_at - timedelta(seconds=350),
+        )
+        mutation_session.add(inserted_log)
+        mutation_session.delete(mutation_session.get(MailLog, first_batch[0].id))
+        mutation_session.commit()
+        inserted_id = inserted_log.id
+
+    exported_ids = [log.id for log in first_batch]
+    exported_ids.extend(log.id for batch in batches for log in batch)
+
+    assert exported_ids == expected_ids
+    assert inserted_id not in exported_ids
+    assert len(exported_ids) == len(set(exported_ids))

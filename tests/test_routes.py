@@ -2811,8 +2811,11 @@ def test_export_execution_logs_csv_streams_bounded_batches_after_request_session
     csv_text = run(_read_stream_body(response))
     assert csv_text.startswith("\ufeffID,规则ID,触发方式,状态,")
     assert csv_text.count("\r\n") == 1201
-    assert len(statements) >= 3
-    assert all(statement._limit_clause.value == 500 for statement in statements)
+    batch_statements = [
+        statement for statement in statements if statement._limit_clause is not None
+    ]
+    assert len(batch_statements) >= 3
+    assert all(statement._limit_clause.value == 500 for statement in batch_statements)
 
 
 def test_export_execution_logs_csv_requires_login(monkeypatch):
