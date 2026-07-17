@@ -20,6 +20,7 @@ from app.models import (
     SmtpConfig,
     SqlDataSource,
     TriggerType,
+    utc_now,
 )
 from app.settings import get_settings
 from app.sql_client import PyodbcSqlServerClient
@@ -91,7 +92,7 @@ def execute_rule_by_id(
         rule_id,
         lease_seconds=get_settings().rule_execution_lease_seconds,
     ):
-        started_at = datetime.utcnow()
+        started_at = utc_now()
         total_attempts = max(1, max_attempts)
         result = None
         attempts_used = 0
@@ -117,7 +118,7 @@ def execute_rule_by_id(
             trigger_type=trigger_type,
             result=result,
             started_at=started_at,
-            finished_at=datetime.utcnow(),
+            finished_at=utc_now(),
         )
 
 
@@ -158,7 +159,7 @@ def _build_suppression_filter(session: Session, rule: AlertRule):
     if not rule.suppress_duplicates or not rule.suppression_key_field:
         return None, None
 
-    now = datetime.utcnow()
+    now = utc_now()
     cutoff = now - timedelta(hours=rule.suppression_window_hours)
     state = {"new_keys": [], "suppressed_keys": [], "now": now}
     seen_in_run = set()

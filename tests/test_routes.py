@@ -23,6 +23,7 @@ from app.models import (
     SmtpConfig,
     SqlDataSource,
     TriggerType,
+    utc_now,
 )
 from app.mailer import MailSendResult
 from app.settings import Settings
@@ -34,7 +35,7 @@ CSRF_PATTERN = re.compile(r'name="_csrf_token" value="([^"]+)"')
 
 
 def _set_required_settings(monkeypatch):
-    monkeypatch.setenv("SESSION_SECRET", "test-session-secret")
+    monkeypatch.setenv("SESSION_SECRET", "test-session-secret-with-32-bytes")
     monkeypatch.setenv("SECRET_KEY", VALID_FERNET_KEY)
 
 
@@ -234,7 +235,7 @@ def test_settings_reject_invalid_secret_key():
     from app.settings import Settings
 
     with pytest.raises(ValidationError) as exc_info:
-        Settings(session_secret="valid-session-secret", secret_key="not-a-fernet-key")
+        Settings(session_secret="valid-session-secret-with-32-bytes", secret_key="not-a-fernet-key")
 
     error_fields = {error["loc"][0] for error in exc_info.value.errors()}
     assert "secret_key" in error_fields
@@ -244,7 +245,7 @@ def test_scheduler_sync_interval_defaults_to_ten_seconds():
     from app.settings import Settings
 
     settings = Settings(
-        session_secret="valid-session-secret",
+        session_secret="valid-session-secret-with-32-bytes",
         secret_key=VALID_FERNET_KEY,
     )
 
@@ -252,7 +253,7 @@ def test_scheduler_sync_interval_defaults_to_ten_seconds():
 
 
 def test_rule_execution_lease_defaults_to_two_hours():
-    settings = Settings(session_secret="valid-session-secret", secret_key=VALID_FERNET_KEY)
+    settings = Settings(session_secret="valid-session-secret-with-32-bytes", secret_key=VALID_FERNET_KEY)
 
     assert settings.rule_execution_lease_seconds == 7200
 
@@ -261,7 +262,7 @@ def test_rule_execution_lease_defaults_to_two_hours():
 def test_rule_execution_lease_rejects_non_positive_values(value):
     with pytest.raises(ValidationError):
         Settings(
-            session_secret="valid-session-secret",
+            session_secret="valid-session-secret-with-32-bytes",
             secret_key=VALID_FERNET_KEY,
             rule_execution_lease_seconds=value,
         )
@@ -270,7 +271,7 @@ def test_rule_execution_lease_rejects_non_positive_values(value):
 def test_web_security_settings_have_safe_compatible_defaults():
     from app.settings import Settings
 
-    settings = Settings(session_secret="valid-session-secret", secret_key=VALID_FERNET_KEY)
+    settings = Settings(session_secret="valid-session-secret-with-32-bytes", secret_key=VALID_FERNET_KEY)
 
     assert settings.session_cookie_secure is False
     assert settings.login_max_failures == 5
@@ -287,7 +288,7 @@ def test_web_security_integer_settings_reject_non_positive_values(field_name, in
     from app.settings import Settings
 
     values = {
-        "session_secret": "valid-session-secret",
+        "session_secret": "valid-session-secret-with-32-bytes",
         "secret_key": VALID_FERNET_KEY,
         field_name: invalid_value,
     }
@@ -332,7 +333,7 @@ def test_scheduler_sync_interval_reads_environment(monkeypatch):
     monkeypatch.setenv("SCHEDULER_SYNC_INTERVAL_SECONDS", "2.5")
 
     settings = Settings(
-        session_secret="valid-session-secret",
+        session_secret="valid-session-secret-with-32-bytes",
         secret_key=VALID_FERNET_KEY,
     )
 
@@ -348,7 +349,7 @@ def test_scheduler_sync_interval_rejects_non_finite_or_non_positive_values(value
 
     with pytest.raises(ValidationError) as exc_info:
         Settings(
-            session_secret="valid-session-secret",
+            session_secret="valid-session-secret-with-32-bytes",
             secret_key=VALID_FERNET_KEY,
         )
 
@@ -364,7 +365,7 @@ def test_settings_reads_dotenv_file(tmp_path, monkeypatch):
         "\n".join(
             [
                 "APP_NAME=Env 文件预警系统",
-                "SESSION_SECRET=dotenv-session-secret",
+                "SESSION_SECRET=dotenv-session-secret-with-32-bytes",
                 f"SECRET_KEY={VALID_FERNET_KEY}",
             ]
         ),
@@ -378,7 +379,7 @@ def test_settings_reads_dotenv_file(tmp_path, monkeypatch):
         settings = get_settings()
 
         assert settings.app_name == "Env 文件预警系统"
-        assert settings.session_secret == "dotenv-session-secret"
+        assert settings.session_secret == "dotenv-session-secret-with-32-bytes"
         assert settings.secret_key == VALID_FERNET_KEY
     finally:
         get_settings.cache_clear()
@@ -459,7 +460,7 @@ def test_dashboard_uses_real_metrics(monkeypatch, session):
             rule_id=rule.id,
             trigger_type=TriggerType.MANUAL,
             status=ExecutionStatus.FAILED,
-            started_at=datetime.utcnow(),
+            started_at=utc_now(),
             row_count=3,
             email_count=1,
         )

@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import UTC, datetime
 from enum import StrEnum
 from typing import Optional
 
@@ -6,7 +6,7 @@ from sqlmodel import Field, SQLModel
 
 
 def utc_now() -> datetime:
-    return datetime.utcnow()
+    return datetime.now(UTC).replace(tzinfo=None)
 
 
 class SendMode(StrEnum):

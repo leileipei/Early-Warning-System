@@ -5,6 +5,16 @@ from app.models import AdminUser
 from app.security import verify_password
 
 
+def test_password_compatibility_contract_for_admin_cli(session):
+    legacy_hash = "$2b$12$GSm13057BqwXHr3/6MpZLeV9aTcFcj2VpuH5UBb1Q.OZE0DbRIoa."
+
+    user = upsert_admin_user(session, "admin", "new-password")
+
+    assert verify_password("legacy-password", legacy_hash)
+    assert not verify_password("new-password", "not-a-bcrypt-hash")
+    assert verify_password("new-password", user.password_hash)
+
+
 def test_upsert_admin_user_creates_admin(session):
     user = upsert_admin_user(session, "admin", "initial-password")
 

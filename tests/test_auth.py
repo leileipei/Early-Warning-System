@@ -21,7 +21,7 @@ CSRF_PATTERN = re.compile(r'name="_csrf_token" value="([^"]+)"')
 
 
 def _set_required_settings(monkeypatch):
-    monkeypatch.setenv("SESSION_SECRET", "test-session-secret")
+    monkeypatch.setenv("SESSION_SECRET", "test-session-secret-with-32-bytes")
     monkeypatch.setenv("SECRET_KEY", Fernet.generate_key().decode())
 
 
@@ -126,6 +126,23 @@ def test_password_hash_round_trip():
     assert password_hash != "CorrectHorseBatteryStaple"
     assert verify_password("CorrectHorseBatteryStaple", password_hash)
     assert not verify_password("wrong", password_hash)
+
+
+def test_password_verification_supports_existing_bcrypt_hashes():
+    password_hash = "$2b$12$GSm13057BqwXHr3/6MpZLeV9aTcFcj2VpuH5UBb1Q.OZE0DbRIoa."
+
+    assert verify_password("legacy-password", password_hash)
+
+
+def test_password_verification_returns_false_for_invalid_hash():
+    assert not verify_password("password", "not-a-bcrypt-hash")
+
+
+def test_new_password_hashes_use_bcrypt_and_can_be_verified():
+    password_hash = hash_password("new-password")
+
+    assert password_hash.startswith("$2b$")
+    assert verify_password("new-password", password_hash)
 
 
 def test_login_page_uses_auth_shell(auth_app):
