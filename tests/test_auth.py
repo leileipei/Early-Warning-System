@@ -216,6 +216,36 @@ def test_login_with_wrong_password_returns_400(auth_app, auth_engine):
     assert response.json() == {"detail": "用户名或密码错误"}
 
 
+@pytest.mark.parametrize(
+    "accept_header",
+    [
+        "application/json, text/html;q=0.1",
+        "text/html;q=0",
+        "*/*",
+    ],
+    ids=["json-preferred", "html-rejected", "wildcard-default"],
+)
+def test_login_error_uses_json_unless_html_is_strictly_preferred(
+    auth_app,
+    auth_engine,
+    accept_header,
+):
+    _create_admin_user(auth_engine)
+    client = TestClient(auth_app)
+
+    response = _csrf_post(
+        client,
+        "/login",
+        data={"username": "admin", "password": "wrong-password"},
+        headers={"accept": accept_header},
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 400
+    assert response.headers["content-type"].startswith("application/json")
+    assert response.json() == {"detail": "用户名或密码错误"}
+
+
 def test_html_login_with_wrong_password_renders_generic_error(auth_app, auth_engine):
     _create_admin_user(auth_engine)
     client = TestClient(auth_app)
@@ -226,12 +256,20 @@ def test_html_login_with_wrong_password_renders_generic_error(auth_app, auth_eng
         client,
         "/login",
         data={"username": submitted_username, "password": submitted_password},
-        headers={"accept": "text/html"},
+        headers={
+            "accept": (
+                "text/html,application/xhtml+xml,application/xml;q=0.9,"
+                "image/avif,image/webp,*/*;q=0.8"
+            )
+        },
         follow_redirects=False,
     )
 
     assert response.status_code == 400
     assert response.headers["content-type"].startswith("text/html")
+    assert response.headers["content-security-policy"]
+    assert response.headers["x-content-type-options"] == "nosniff"
+    assert response.headers["x-frame-options"] == "DENY"
     assert "用户名或密码错误" in response.text
     assert submitted_username not in response.text
     assert submitted_password not in response.text

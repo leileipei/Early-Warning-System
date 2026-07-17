@@ -18,6 +18,51 @@ from app.web_security import (
 )
 
 
+def _quality_value(parameters: list[str]) -> float:
+    for parameter in parameters:
+        name, separator, value = parameter.partition("=")
+        if name.strip().lower() != "q":
+            continue
+        if not separator:
+            return 0.0
+        try:
+            quality = float(value.strip())
+        except ValueError:
+            return 0.0
+        return quality if 0.0 <= quality <= 1.0 else 0.0
+    return 1.0
+
+
+def _media_quality(accept_header: str, target: str) -> float:
+    target_type, target_subtype = target.split("/", 1)
+    best_specificity = -1
+    best_quality = 0.0
+
+    for item in accept_header.split(","):
+        media_range, *parameters = item.split(";")
+        media_type, separator, media_subtype = media_range.strip().lower().partition("/")
+        if not separator or media_type not in {"*", target_type}:
+            continue
+        if media_subtype not in {"*", target_subtype}:
+            continue
+
+        specificity = int(media_type != "*") + int(media_subtype != "*")
+        quality = _quality_value(parameters)
+        if specificity > best_specificity:
+            best_specificity = specificity
+            best_quality = quality
+        elif specificity == best_specificity:
+            best_quality = max(best_quality, quality)
+
+    return best_quality
+
+
+def _prefers_html(accept_header: str) -> bool:
+    html_quality = _media_quality(accept_header, "text/html")
+    json_quality = _media_quality(accept_header, "application/json")
+    return html_quality > 0.0 and html_quality > json_quality
+
+
 def create_app() -> FastAPI:
     settings = get_settings()
     app = FastAPI(title=settings.app_name)
@@ -43,7 +88,7 @@ def create_app() -> FastAPI:
 
     @app.exception_handler(HTTPException)
     async def handle_http_exception(request: Request, exc: HTTPException):
-        accepts_html = "text/html" in request.headers.get("accept", "")
+        accepts_html = _prefers_html(request.headers.get("accept", ""))
         if (
             request.url.path == "/login"
             and request.method == "POST"
