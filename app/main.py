@@ -1,10 +1,12 @@
-from fastapi import FastAPI, HTTPException, Request, status
+from fastapi import FastAPI, HTTPException, Request, Response, status
 from fastapi.exception_handlers import http_exception_handler
 from fastapi.responses import RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.sessions import SessionMiddleware
 
 from app.auth import router as auth_router
+from app.db import get_engine
+from app.health import check_readiness
 from app.paths import STATIC_DIR
 from app.routes import router as page_router
 from app.settings import get_settings
@@ -43,6 +45,19 @@ def create_app() -> FastAPI:
     @app.get("/health")
     def health() -> dict[str, str]:
         return {"status": "ok"}
+
+    @app.get("/health/ready")
+    def readiness(response: Response) -> dict[str, object]:
+        result = check_readiness(
+            get_engine(),
+            heartbeat_timeout_seconds=settings.worker_heartbeat_timeout_seconds,
+        )
+        if not result.ready:
+            response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE
+        return {
+            "status": "ready" if result.ready else "not_ready",
+            "components": result.components,
+        }
 
     return app
 

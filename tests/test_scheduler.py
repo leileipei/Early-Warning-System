@@ -406,7 +406,7 @@ def test_worker_sync_rules_once_loads_all_rules_and_calls_synchronizer():
 
     result = worker.sync_rules_once(synchronizer, session_factory=FakeSession)
 
-    assert result is True
+    assert result == worker.RuleSyncResult(ok=True)
     synchronizer.sync.assert_called_once_with(rules)
 
 
@@ -423,7 +423,9 @@ def test_worker_sync_rules_once_preserves_scheduler_when_database_read_fails():
 
     result = worker.sync_rules_once(synchronizer, session_factory=FailingSession)
 
-    assert result is False
+    assert result == worker.RuleSyncResult(
+        ok=False, error="RuntimeError: worker synchronization failed"
+    )
     synchronizer.sync.assert_not_called()
 
 
