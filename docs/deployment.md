@@ -139,6 +139,20 @@ early_warning.sqlite3
 
 如果修改了 `DATABASE_URL`，请确认 Web 和 Worker 使用同一份配置。
 
+`init_db()` 是可重复执行的 SQLite 架构升级入口。升级时必须在 Web 和 Worker
+均停止后由单一进程调用，不要依赖两个服务启动时并发完成升级。它会保留已有数据，
+补充管理员的 `session_version`、Worker 心跳表和执行/邮件日志索引；对历史 SMTP
+数据会只保留更新时间最新的一条启用配置，并创建约束，保证最多一条 SMTP 配置为启用。
+
+升级完成后在服务仍停止时检查数据库：
+
+```bash
+sqlite3 early_warning.sqlite3 "PRAGMA integrity_check; PRAGMA foreign_key_check;"
+```
+
+第一行必须是 `ok`，且 `foreign_key_check` 不应有任何后续输出。若任一检查失败，不要
+启动服务，按“升级失败回滚”恢复备份。
+
 ## 7. 创建管理员
 
 创建或更新管理员账号：
@@ -228,8 +242,65 @@ python3 -m app.worker
 - 如果 Worker 没有运行，Cron 规则不会自动触发。
 - 手动执行规则不依赖 Worker。
 - 新建规则、修改 Cron、启用或停用规则后无需重启 Worker。
+- Worker 启动和每次规则同步都会写入同一个 `workerheartbeat` 记录；Web 的
+  `/health/ready` 据此确认 Worker 是否存在、未超时且最近同步成功。
+- SQLite 部署只支持一个 Worker。不要同时启动两个 Worker 或将 SQLite 放在多个主机
+  共享使用；如需多 Worker/多实例，需要先迁移至具备并发协调能力的存储方案。
 
-## 11. 推荐生产运行方式
+## 11. 健康与就绪检查
+
+`/health` 仅表示 Web 进程可以响应，预期始终返回 HTTP 200：
+
+```bash
+curl -fsS http://127.0.0.1:8000/health
+```
+
+`/health/ready` 同时检查数据库架构和 Worker 心跳。启动 Worker 并等待至少一个同步
+周期后才应返回 HTTP 200；Worker 未启动、心跳过期或最近同步失败时预期返回 HTTP 503，
+此时不得把服务接入流量：
+
+```bash
+curl -sS -o /dev/null -w "%{http_code}\n" http://127.0.0.1:8000/health/ready
+```
+
+## 12. 停机升级与回滚
+
+以下以 systemd 服务名 `early-warning-web` 和 `early-warning-worker` 为例；使用
+Supervisor、Docker 或其他守护器时，以等价的停止和启动命令替换。升级期间应临时
+禁止守护器自动拉起服务。
+
+1. 停止 Worker，再停止 Web：
+
+   ```bash
+   systemctl stop early-warning-worker
+   systemctl stop early-warning-web
+   ```
+
+2. 备份 SQLite 和 `.env`，并保留本次规则 JSON 导出；数据库与 `.env` 中的
+   `SECRET_KEY` 必须成对保管。
+3. 更新已审核的代码版本，在锁定的 Python 3.11-3.13 环境中安装依赖：
+
+   ```bash
+   .venv/bin/pip install -r requirements.lock
+   .venv/bin/pip install --no-deps .
+   ```
+
+4. 仅调用一次迁移入口并完成 SQLite 检查：
+
+   ```bash
+   .venv/bin/python -c "from app.db import init_db; init_db()"
+   sqlite3 early_warning.sqlite3 "PRAGMA integrity_check; PRAGMA foreign_key_check;"
+   ```
+
+5. 启动 Web，确认 `/health` 为 200；随后启动唯一的 Worker，等待
+   `/health/ready` 为 200 后再恢复正常流量。
+
+升级失败、数据库检查异常或就绪检查在预定窗口内无法恢复时：保持两个服务停止，检出
+上一已知可用代码版本，恢复同一时间点的 SQLite 与 `.env` 备份，使用该版本的
+`requirements.lock` 安装依赖；随后依次启动 Web、确认 `/health`，启动唯一 Worker，
+并确认 `/health/ready` 为 200。不得把新库与旧 `.env` 或旧库与新 `SECRET_KEY` 混用。
+
+## 13. 推荐生产运行方式
 
 建议使用系统服务管理 Web 和 Worker，例如 systemd、Supervisor、Docker 或其他进程守护工具。
 
@@ -241,7 +312,7 @@ python3 -m app.worker
 - Web 和 Worker 使用同一份 SQLite 数据库或同一个 `DATABASE_URL`。
 - 定期备份 SQLite 数据库文件。
 
-## 12. 反向代理建议
+## 14. 反向代理建议
 
 如果使用 Nginx、Apache 或其他网关代理 Web 服务：
 
@@ -256,7 +327,7 @@ Nginx 代理目标示例：
 http://127.0.0.1:8000
 ```
 
-## 13. 首次后台配置流程
+## 15. 首次后台配置流程
 
 1. 登录后台。
 2. 进入“配置”页面。
@@ -273,7 +344,7 @@ http://127.0.0.1:8000
 13. 手动执行规则，确认邮件和日志结果。
 14. 启动 Worker，让规则按 Cron 自动执行。
 
-## 14. SQL Server 连接排查
+## 16. SQL Server 连接排查
 
 ### 连接失败
 
@@ -312,7 +383,7 @@ SERVER\INSTANCE
 - SQL Server 账号是否只有只读权限。
 - 查询超时时间是否太短。
 
-## 15. SMTP 排查
+## 17. SMTP 排查
 
 检查项：
 

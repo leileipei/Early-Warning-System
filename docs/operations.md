@@ -62,6 +62,20 @@ systemctl status early-warning-worker
 ps aux | grep "app.worker"
 ```
 
+除进程状态外，还应检查就绪端点：
+
+```bash
+curl -sS -o /dev/null -w "%{http_code}\n" http://127.0.0.1:8000/health/ready
+```
+
+预期为 `200`。该端点会检查数据库架构和 Worker 心跳：Worker 缺失、心跳超过
+`WORKER_HEARTBEAT_TIMEOUT_SECONDS` 或最近一次同步失败时返回 `503`。`/health`
+只证明 Web 可以响应，不能替代 `/health/ready`。
+
+SQLite 部署仅允许一个 Worker；不应以多个 Web/Worker 进程或多个主机共享同一个
+SQLite 文件来扩容。Worker 的启动和每次同步会更新 `workerheartbeat` 表，值班时可将
+该表作为心跳故障的排查依据。
+
 ### 3.3 规则执行结果
 
 后台进入“日志”页面，重点检查：
@@ -146,6 +160,14 @@ sqlite3 early_warning.sqlite3 ".backup 'backups/early_warning_$(date +%F_%H%M%S)
 cp .env backups/env_$(date +%F_%H%M%S)
 ```
 
+备份完成后至少执行一次完整性检查；`integrity_check` 首行必须为 `ok`，
+`foreign_key_check` 必须无输出：
+
+```bash
+sqlite3 backups/early_warning_2026-01-01_000000.sqlite3 \
+  "PRAGMA integrity_check; PRAGMA foreign_key_check;"
+```
+
 ### 4.4 规则导出
 
 进入后台“规则”页面，点击“导出规则”。
@@ -176,36 +198,57 @@ cp .env backups/env_$(date +%F_%H%M%S)
 
 ## 6. 升级发布流程
 
-建议按以下顺序升级：
+建议按以下顺序升级。以下 systemd 服务名仅为示例，使用其他守护器时需执行等价操作，
+并在窗口内禁止自动重启：
 
 1. 通知相关人员，确认升级窗口。
 2. 备份 SQLite 数据库和 `.env`。
 3. 导出规则 JSON。
-4. 停止 Worker，避免升级过程中定时任务执行。
-5. 停止 Web。
+4. 停止 Worker，避免升级过程中定时任务执行；再停止 Web。
 6. 拉取最新代码。
 7. 安装或更新依赖。
 8. 在 Web 和 Worker 均保持停止的状态下，由单一进程执行一次 `init_db()`。
-9. 确认 `init_db()` 成功退出且没有数据库错误。
-10. 启动 Web。
-11. 打开登录页并执行健康检查。
-12. 启动 Worker。
-13. 手动执行一条测试规则。
-14. 检查日志页面是否有异常。
+9. 确认 `init_db()` 成功退出，运行 `PRAGMA integrity_check` 和
+   `PRAGMA foreign_key_check`，分别得到 `ok` 和无外键异常。
+10. 启动 Web，并确认 `/health` 返回 200。
+11. 启动唯一的 Worker，等待 `/health/ready` 返回 200。
+12. 手动执行一条测试规则。
+13. 检查日志页面是否有异常。
 
 命令示例：
 
 ```bash
+systemctl stop early-warning-worker
+systemctl stop early-warning-web
+sqlite3 early_warning.sqlite3 ".backup 'backups/early_warning_$(date +%F_%H%M%S).sqlite3'"
+cp .env backups/env_$(date +%F_%H%M%S)
 git pull
-source .venv/bin/activate
-pip install -r requirements.lock
-pip install --no-deps .
-python3 -c "from app.db import init_db; init_db()"
-uvicorn app.main:create_app --factory --host 0.0.0.0 --port 8000
-python3 -m app.worker
+.venv/bin/pip install -r requirements.lock
+.venv/bin/pip install --no-deps .
+.venv/bin/python -c "from app.db import init_db; init_db()"
+sqlite3 early_warning.sqlite3 "PRAGMA integrity_check; PRAGMA foreign_key_check;"
+systemctl start early-warning-web
+curl -fsS http://127.0.0.1:8000/health
+systemctl start early-warning-worker
+curl -fsS -o /dev/null -w "%{http_code}\n" http://127.0.0.1:8000/health/ready
 ```
 
 只有 `init_db()` 成功后才能重新启动 Web 和 Worker。不要依赖两个服务进程并发启动来完成数据库升级。如果使用 systemd 或 Supervisor，请使用对应服务管理命令替代手工启动，并确保升级期间不会自动拉起服务。
+
+### 6.1 升级失败回滚
+
+出现迁移异常、SQLite 完整性/外键检查失败、Web `/health` 非 200，或 Worker 启动后
+`/health/ready` 在升级窗口内仍非 200 时，保持 Web 和 Worker 停止并执行回滚：
+
+1. 检出上一已知可用的代码版本，并使用该版本的 `requirements.lock` 重新安装依赖。
+2. 恢复同一时间点的 SQLite 备份与 `.env`；两者必须配对，尤其不能丢失或替换用于
+   解密历史密码的 `SECRET_KEY`。
+3. 对恢复后的数据库运行 `PRAGMA integrity_check; PRAGMA foreign_key_check;`。
+4. 先启动 Web 并确认 `/health` 为 200，再启动唯一 Worker 并确认
+   `/health/ready` 为 200。
+
+不要在失败的新库上手工删表、删索引或手改迁移状态来继续上线；保留副本后按变更流程
+排查，并在隔离副本上复现。
 
 ## 7. 常见故障处理
 
@@ -286,6 +329,16 @@ python3 -m app.worker
 ### SMTP 与执行记录一致性
 
 抑制状态、执行日志和邮件日志会在同一个 SQLite 事务中写入；任一写入失败时，这些本地记录会全部回滚。SMTP 发送属于不可回滚的外部副作用：邮件发送成功后，如果 SQLite 提交失败，已经发出的邮件无法撤回。后续重试可能产生重复邮件，因此系统提供的是至少一次发送语义。
+
+数据库迁移会清理历史上多个启用 SMTP 的记录，只保留 `updated_at` 最新（再以 ID 最大为准）
+的一条，并以部分唯一索引强制最多一个 `enabled` SMTP 配置。迁移前后均不得通过直接
+修改 SQLite 绕过该约束。
+
+管理员修改密码或由命令行重置管理员密码时，`session_version` 会递增，旧浏览器会话在
+下一次请求时失效并需重新登录。这是预期安全行为，不应通过手工修改数据库规避。
+
+`executionlog` 的规则、状态、开始时间索引，以及 `maillog` 的执行记录、状态、发送时间
+索引由 `init_db()` 补齐，用于后台日志筛选和分页；不应在生产库中随意删除这些索引。
 
 ### 7.7 执行日志显示已重试
 
