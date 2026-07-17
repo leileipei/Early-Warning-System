@@ -165,7 +165,9 @@ class RuleExecutor:
                     error_message=public_error_summary(exc, fallback=SMTP_SEND_FAILURE),
                 ),
             )
-        if not result.success:
+        if result.success:
+            result = MailSendResult(success=True)
+        else:
             log_exception_safely(
                 logger,
                 "Rule email returned failure: operation=rule_email_send",

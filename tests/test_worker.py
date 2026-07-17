@@ -1,4 +1,5 @@
 from types import SimpleNamespace
+import re
 from unittest.mock import Mock
 
 from sqlmodel import Session
@@ -65,6 +66,7 @@ def test_sync_rules_once_returns_fixed_heartbeat_error_and_logs_redacted_traceba
         ok=False, error="Worker 同步失败，请检查数据库连接和调度配置"
     )
     assert "error_type=RuntimeError" in caplog.text
+    assert re.search(r"error_id=[0-9a-f]{32}", caplog.text)
     assert "operation=read_alert_rules" in caplog.text
     for secret in ("db.internal", "report_user", "database-password"):
         assert secret not in caplog.text

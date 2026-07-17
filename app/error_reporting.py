@@ -1,9 +1,15 @@
 import logging
 import re
 import traceback
+from uuid import uuid4
 
 
-_ASSIGNMENT_VALUE = r"(?:\{[^}]*\}|\"[^\"]*\"|'[^']*'|[^;\s]+)"
+_DOUBLE_QUOTED_VALUE = r'"(?:\\.|[^"\\])*"'
+_SINGLE_QUOTED_VALUE = r"'(?:\\.|[^'\\])*'"
+_ODBC_BRACED_VALUE = r"\{(?:}}|[^}])*\}"
+_ASSIGNMENT_VALUE = (
+    rf"(?:{_DOUBLE_QUOTED_VALUE}|{_SINGLE_QUOTED_VALUE}|{_ODBC_BRACED_VALUE}|[^;\s]+)"
+)
 SENSITIVE_ASSIGNMENT = re.compile(
     r"(?i)\b((?:[A-Za-z0-9]+_)*(?:pwd|password|secret|secret_key|session_secret))"
     rf"\s*=\s*{_ASSIGNMENT_VALUE}"
@@ -31,9 +37,11 @@ def public_error_summary(exc: BaseException, *, fallback: str) -> str:
 
 def log_exception_safely(logger: logging.Logger, message: str, exc: BaseException) -> None:
     rendered = "".join(traceback.format_exception(type(exc), exc, exc.__traceback__))
+    error_id = uuid4().hex
     logger.error(
-        "%s: error_type=%s\n%s",
+        "%s: error_id=%s; error_type=%s\n%s",
         redact_sensitive_text(message),
+        error_id,
         type(exc).__name__,
         redact_sensitive_text(rendered, limit=4_000),
     )

@@ -42,6 +42,18 @@ def test_redact_sensitive_text_handles_quoted_prefixed_values_and_multiline_odbc
         assert secret not in rendered
 
 
+def test_redact_sensitive_text_consumes_escaped_quoted_and_odbc_braced_values():
+    rendered = redact_sensitive_text(
+        'SMTP_PASSWORD="alpha\\\" QUOTETAIL"; '
+        'DATABASE="alpha\\\" DATABASETAIL"; '
+        "UID={alpha;beta}}UIDTAIL}; "
+        "SERVER={alpha;beta}}SERVERTAIL};"
+    )
+
+    for secret in ("alpha", "beta", "QUOTETAIL", "DATABASETAIL", "UIDTAIL", "SERVERTAIL"):
+        assert secret not in rendered
+
+
 def test_log_exception_safely_keeps_a_bounded_redacted_traceback(caplog):
     logger = logging.getLogger("tests.error_reporting")
     fernet_key = "b" * 43 + "="

@@ -1,4 +1,5 @@
 import sys
+import re
 from dataclasses import dataclass
 
 import pytest
@@ -137,6 +138,7 @@ def test_query_logs_redacted_connection_error_and_reraises_original_exception(mo
             client.query("select id from orders", timeout_seconds=7, max_rows=25)
 
     assert "error_type=ConnectionError" in caplog.text
+    assert re.search(r"error_id=[0-9a-f]{32}", caplog.text)
     for secret in ("db.internal", "report_user", "database-password"):
         assert secret not in caplog.text
 

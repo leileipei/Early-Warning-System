@@ -1,4 +1,5 @@
 from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
+import re
 from threading import Barrier, Event, Lock
 from types import SimpleNamespace
 
@@ -530,11 +531,12 @@ def test_partial_mail_failures_are_partial_failed():
     assert [mail_result.result.success for mail_result in result.mail_results] == [True, False]
 
 
-def test_mailer_exception_is_recorded_as_failed_send():
-    mailer = FakeMailer(error=RuntimeError("smtp unavailable"))
+def test_mailer_exception_is_recorded_as_failed_send_with_error_id(caplog):
+    mailer = FakeMailer(error=RuntimeError("SMTP_PASSWORD=executor-secret"))
     executor = RuleExecutor(sql_client=FakeSqlClient([{"id": 1, "amount": 100}]), mailer=mailer)
 
-    result = executor.execute(make_rule())
+    with caplog.at_level("ERROR"):
+        result = executor.execute(make_rule())
 
     assert result.status == ExecutionStatus.FAILED
     assert result.row_count == 1
@@ -544,6 +546,8 @@ def test_mailer_exception_is_recorded_as_failed_send():
         success=False,
         error_message="SMTP 发送失败，请检查服务器、端口、加密方式和账号配置",
     )
+    assert re.search(r"error_id=[0-9a-f]{32}", caplog.text)
+    assert "executor-secret" not in caplog.text
 
 
 def test_compatible_mailer_failure_result_is_redacted_in_execution_details(caplog):
@@ -564,6 +568,16 @@ def test_compatible_mailer_failure_result_is_redacted_in_execution_details(caplo
     )
     assert "error_type=RuntimeError" in caplog.text
     assert "mailer-secret" not in caplog.text
+
+
+def test_successful_mailer_result_drops_untrusted_error_message():
+    mailer = FakeMailer(results=[MailSendResult(success=True, error_message="SMTP_PASSWORD=success-secret")])
+    executor = RuleExecutor(sql_client=FakeSqlClient([{"id": 1, "amount": 100}]), mailer=mailer)
+
+    result = executor.execute(make_rule())
+
+    assert result.status == ExecutionStatus.SUCCESS
+    assert result.mail_results[0].result == MailSendResult(success=True, error_message="")
 
 
 def test_recipients_and_cc_are_parsed_for_messages():

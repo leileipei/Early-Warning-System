@@ -1,4 +1,5 @@
 from email import message_from_string
+import re
 
 from app.mailer import EmailMessage, MailSendResult, SmtpMailer
 
@@ -113,6 +114,7 @@ def test_smtp_mailer_returns_fixed_error_and_logs_redacted_failure(caplog):
         error_message="SMTP 发送失败，请检查服务器、端口、加密方式和账号配置",
     )
     assert "error_type=RuntimeError" in caplog.text
+    assert re.search(r"error_id=[0-9a-f]{32}", caplog.text)
     assert "smtp-secret" not in caplog.text
     assert "c" * 43 + "=" not in caplog.text
 
