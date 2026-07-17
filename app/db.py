@@ -81,36 +81,56 @@ def migrate_sqlite_schema(bind: Engine | Connection) -> None:
 
 def _migrate_sqlite_schema(connection: Connection) -> None:
     inspector = inspect(connection)
-    if "sqldatasource" not in inspector.get_table_names():
-        return
+    table_names = set(inspector.get_table_names())
+    if "sqldatasource" in table_names:
+        existing_columns = {
+            column["name"] for column in inspector.get_columns("sqldatasource")
+        }
+        columns_to_add = {
+            "odbc_driver": "VARCHAR NOT NULL DEFAULT 'ODBC Driver 18 for SQL Server'",
+            "server_override": "VARCHAR NOT NULL DEFAULT ''",
+            "encrypt": "VARCHAR NOT NULL DEFAULT 'yes'",
+            "trust_server_certificate": "VARCHAR NOT NULL DEFAULT 'yes'",
+            "extra_params": "VARCHAR NOT NULL DEFAULT ''",
+        }
+        for column_name, ddl in columns_to_add.items():
+            if column_name not in existing_columns:
+                connection.execute(
+                    text(f"ALTER TABLE sqldatasource ADD COLUMN {column_name} {ddl}")
+                )
 
-    existing_columns = {column["name"] for column in inspector.get_columns("sqldatasource")}
-    columns_to_add = {
-        "odbc_driver": "VARCHAR NOT NULL DEFAULT 'ODBC Driver 18 for SQL Server'",
-        "server_override": "VARCHAR NOT NULL DEFAULT ''",
-        "encrypt": "VARCHAR NOT NULL DEFAULT 'yes'",
-        "trust_server_certificate": "VARCHAR NOT NULL DEFAULT 'yes'",
-        "extra_params": "VARCHAR NOT NULL DEFAULT ''",
+    if "alertrule" in table_names:
+        existing_rule_columns = {
+            column["name"] for column in inspector.get_columns("alertrule")
+        }
+        rule_columns_to_add = {
+            "dynamic_recipient_field": "VARCHAR NOT NULL DEFAULT ''",
+            "dynamic_cc_field": "VARCHAR NOT NULL DEFAULT ''",
+            "suppress_duplicates": "BOOLEAN NOT NULL DEFAULT 0",
+            "suppression_key_field": "VARCHAR NOT NULL DEFAULT ''",
+            "suppression_window_hours": "INTEGER NOT NULL DEFAULT 24",
+            "archived_at": "TIMESTAMP",
+        }
+        for column_name, ddl in rule_columns_to_add.items():
+            if column_name not in existing_rule_columns:
+                connection.execute(text(f"ALTER TABLE alertrule ADD COLUMN {column_name} {ddl}"))
+
+    heartbeat_columns = {
+        "id",
+        "worker_id",
+        "started_at",
+        "last_seen_at",
+        "last_sync_ok",
+        "last_error",
     }
-    for column_name, ddl in columns_to_add.items():
-        if column_name not in existing_columns:
-            connection.execute(text(f"ALTER TABLE sqldatasource ADD COLUMN {column_name} {ddl}"))
-
-    if "alertrule" not in inspector.get_table_names():
-        return
-
-    existing_rule_columns = {column["name"] for column in inspector.get_columns("alertrule")}
-    rule_columns_to_add = {
-        "dynamic_recipient_field": "VARCHAR NOT NULL DEFAULT ''",
-        "dynamic_cc_field": "VARCHAR NOT NULL DEFAULT ''",
-        "suppress_duplicates": "BOOLEAN NOT NULL DEFAULT 0",
-        "suppression_key_field": "VARCHAR NOT NULL DEFAULT ''",
-        "suppression_window_hours": "INTEGER NOT NULL DEFAULT 24",
-        "archived_at": "TIMESTAMP",
-    }
-    for column_name, ddl in rule_columns_to_add.items():
-        if column_name not in existing_rule_columns:
-            connection.execute(text(f"ALTER TABLE alertrule ADD COLUMN {column_name} {ddl}"))
+    if "workerheartbeat" in table_names:
+        existing_heartbeat_columns = {
+            column["name"] for column in inspector.get_columns("workerheartbeat")
+        }
+        missing_columns = heartbeat_columns - existing_heartbeat_columns
+        if missing_columns:
+            columns = ", ".join(sorted(missing_columns))
+            raise RuntimeError(f"workerheartbeat schema is incomplete: {columns}")
 
 
 def get_session() -> Generator[Session, None, None]:

@@ -103,6 +103,15 @@ class RuleExecutionLease(SQLModel, table=True):
     expires_at: datetime
 
 
+class WorkerHeartbeat(SQLModel, table=True):
+    id: int = Field(default=1, primary_key=True)
+    worker_id: str
+    started_at: datetime = Field(default_factory=utc_now)
+    last_seen_at: datetime = Field(default_factory=utc_now)
+    last_sync_ok: bool = True
+    last_error: str = ""
+
+
 class AlertSuppression(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
     rule_id: int = Field(foreign_key="alertrule.id", index=True)

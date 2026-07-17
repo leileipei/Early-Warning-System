@@ -4,7 +4,7 @@ from concurrent.futures import ThreadPoolExecutor
 from threading import Barrier, Lock
 
 import pytest
-from sqlalchemy import event, inspect, text
+from sqlalchemy import Index, event, func, inspect, text
 from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, SQLModel, select
 
@@ -17,6 +17,7 @@ from app.models import (
     SendMode,
     SqlDataSource,
     TriggerType,
+    WorkerHeartbeat,
     utc_now,
 )
 
@@ -89,6 +90,78 @@ def test_init_db_creates_model_tables(engine):
 
 def test_init_db_creates_rule_execution_lease_table(engine):
     assert "ruleexecutionlease" in inspect(engine).get_table_names()
+
+
+def test_init_db_adds_worker_heartbeat_table_to_existing_database(tmp_path):
+    from app.db import create_db_engine, init_db
+
+    database_path = tmp_path / "legacy.sqlite3"
+    legacy_engine = create_db_engine(f"sqlite:///{database_path}")
+    legacy_tables = [
+        table
+        for table in SQLModel.metadata.sorted_tables
+        if table.name != "workerheartbeat"
+    ]
+    SQLModel.metadata.create_all(legacy_engine, tables=legacy_tables)
+
+    init_db(legacy_engine)
+
+    assert "workerheartbeat" in inspect(legacy_engine).get_table_names()
+    columns = {
+        item["name"] for item in inspect(legacy_engine).get_columns("workerheartbeat")
+    }
+    assert columns == {
+        "id",
+        "worker_id",
+        "started_at",
+        "last_seen_at",
+        "last_sync_ok",
+        "last_error",
+    }
+
+
+def test_init_db_is_idempotent_after_worker_heartbeat_exists(engine):
+    from app.db import init_db
+    from app.worker_health import record_worker_start
+
+    with Session(engine) as session:
+        record_worker_start(session, "worker-a", now=utc_now())
+
+    init_db(engine)
+    init_db(engine)
+
+    with Session(engine) as session:
+        assert session.exec(select(func.count()).select_from(WorkerHeartbeat)).one() == 1
+
+
+def test_init_db_rolls_back_sqlite_upgrade_when_worker_heartbeat_index_creation_fails(tmp_path):
+    from app.db import create_db_engine, init_db
+
+    database_path = tmp_path / "failed-heartbeat-index.sqlite3"
+    engine = create_db_engine(f"sqlite:///{database_path}")
+    with engine.begin() as connection:
+        connection.execute(text("CREATE TABLE sqldatasource (id INTEGER PRIMARY KEY)"))
+
+    failure_index = Index(
+        "ix_workerheartbeat_rollback_test",
+        WorkerHeartbeat.__table__.c.worker_id,
+    )
+
+    def fail_before_index_create(_target, _connection, **_kwargs):
+        raise RuntimeError("injected worker heartbeat index creation failure")
+
+    event.listen(failure_index, "before_create", fail_before_index_create)
+    try:
+        with pytest.raises(RuntimeError, match="worker heartbeat index creation failure"):
+            init_db(engine)
+    finally:
+        event.remove(failure_index, "before_create", fail_before_index_create)
+        WorkerHeartbeat.__table__.indexes.remove(failure_index)
+
+    assert set(inspect(engine).get_table_names()) == {"sqldatasource"}
+    assert {column["name"] for column in inspect(engine).get_columns("sqldatasource")} == {
+        "id"
+    }
 
 
 def test_rule_execution_lease_uses_rule_as_primary_key(session):
