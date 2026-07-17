@@ -418,7 +418,7 @@ SERVER\INSTANCE
 
 可以在“配置”页面点击“测试发送”验证 SMTP 配置。
 
-## 16. 日志和导出
+## 18. 日志和导出
 
 后台“日志”页面展示：
 
@@ -432,7 +432,7 @@ SERVER\INSTANCE
 
 CSV 使用 UTF-8 BOM，便于 Excel 打开中文。
 
-## 17. 备份建议
+## 19. 备份建议
 
 如果使用默认 SQLite，至少备份以下文件：
 
@@ -448,7 +448,7 @@ early_warning.sqlite3
 - 备份文件妥善保存，因为其中包含加密后的连接密码。
 - `.env` 中的 `SECRET_KEY` 必须和数据库配套保存，否则加密密码无法解密。
 
-## 18. 安全建议
+## 20. 安全建议
 
 - SQL Server 使用只读账号。
 - 不要给预警系统数据库账号写入、DDL 或执行存储过程权限。
@@ -459,7 +459,7 @@ early_warning.sqlite3
 - 定期更换管理员密码。
 - 定期检查执行日志和邮件日志。
 
-## 19. 常用命令
+## 21. 常用命令
 
 运行测试：
 
@@ -492,9 +492,9 @@ python3 -m app.worker
 python3 -m app.admin_cli admin
 ```
 
-## 20. 生产加固配置
+## 22. 生产加固配置
 
-### 20.1 规则执行租约
+### 22.1 规则执行租约
 
 Web 与 Worker 必须连接同一个 SQLite 数据库。默认配置如下：
 
@@ -504,7 +504,7 @@ RULE_EXECUTION_LEASE_SECONDS=7200
 
 租约自成功获取时开始计时，并在 `RULE_EXECUTION_LEASE_SECONDS` 后过期。进程异常终止时不会重置计时，其他执行者在该租约剩余时间结束后可接管。租约时长必须大于规则的最大预期总运行时间；应在 Web 与 Worker 的环境中设置相同值并重启两个服务。本版本没有租约心跳。
 
-### 20.2 SMTP 私有 CA
+### 22.2 SMTP 私有 CA
 
 SMTP SSL 和 STARTTLS 始终校验证书链与主机名。企业私有 CA 应安装到操作系统信任库，或在启动 Web 与 Worker 前设置：
 
@@ -514,6 +514,6 @@ export SSL_CERT_FILE=/absolute/path/company-ca.pem
 
 证书中的主机名必须与 SMTP 配置页面填写的主机一致。系统不提供跳过 SMTP 证书校验的开关。
 
-### 20.3 SMTP 启用项升级
+### 22.3 SMTP 启用项升级
 
 升级时，系统会自动整理旧 SQLite 数据库中的 SMTP 配置：若存在多个启用项，只保留 `updated_at` 最新的一项；更新时间相同时保留 ID 最大的一项，其余项会被禁用。升级完成后数据库保证最多只能有一个启用 SMTP 配置。

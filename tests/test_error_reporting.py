@@ -103,6 +103,66 @@ def test_redact_sensitive_text_handles_json_and_python_dict_values():
 
 
 @pytest.mark.parametrize(
+    ("value", "secrets", "preserved"),
+    [
+        (
+            '{"password": {"value": "deep-secret", "items": ["alpha", "beta"]}, '
+            '"safe": "keep-json"}',
+            ("deep-secret", "alpha", "beta"),
+            '"safe": "keep-json"',
+        ),
+        (
+            '{"secret": [{"value": "list-secret"}, ["nested", "values"]], '
+            '"safe": 2}',
+            ("list-secret", "nested", "values"),
+            '"safe": 2',
+        ),
+        (
+            "{'session_secret': {'outer': [{'inner': 'deep-single'}, "
+            "{'more': 'with spaces, and commas'}]}, 'safe': 'keep-dict'}",
+            ("deep-single", "with spaces, and commas"),
+            "'safe': 'keep-dict'",
+        ),
+    ],
+)
+def test_redact_sensitive_text_consumes_complete_nested_mapping_values(
+    value, secrets, preserved
+):
+    rendered = redact_sensitive_text(value)
+
+    for secret in secrets:
+        assert secret not in rendered
+    assert preserved in rendered
+
+
+@pytest.mark.parametrize(
+    ("value", "secrets", "preserved"),
+    [
+        (
+            '{"password": {"nested": ["open-secret", {"deep": "tail-secret"}]\n'
+            '"safe": "keep-next-line"',
+            ("open-secret", "tail-secret"),
+            '"safe": "keep-next-line"',
+        ),
+        (
+            "{'secret': ['single-open', {'deep': 'single-tail'}]\n"
+            "'safe': 'keep-single-next-line'",
+            ("single-open", "single-tail"),
+            "'safe': 'keep-single-next-line'",
+        ),
+    ],
+)
+def test_redact_sensitive_text_fails_closed_for_unterminated_nested_values(
+    value, secrets, preserved
+):
+    rendered = redact_sensitive_text(value)
+
+    for secret in secrets:
+        assert secret not in rendered
+    assert preserved in rendered
+
+
+@pytest.mark.parametrize(
     ("value", "secret", "preserved"),
     [
         ('{"PASSWORD" : "mixed-case-secret", "safe": 1}', "mixed-case-secret", '"safe": 1'),
