@@ -112,6 +112,10 @@ def cleanup_expired_logs(
     now: datetime | None = None,
     batch_size: int = DEFAULT_CLEANUP_BATCH_SIZE,
 ) -> int:
+    if batch_size <= 0:
+        raise ValueError("batch_size must be greater than zero")
+
+    effective_batch_size = min(batch_size, DEFAULT_CLEANUP_BATCH_SIZE)
     cutoff = (now or utc_now()) - timedelta(days=retention_days)
     deleted_count = 0
 
@@ -125,7 +129,7 @@ def cleanup_expired_logs(
                         ExecutionLog.status != ExecutionStatus.RUNNING,
                     )
                     .order_by(ExecutionLog.id)
-                    .limit(batch_size)
+                    .limit(effective_batch_size)
                 ).all()
                 if not execution_ids:
                     return deleted_count

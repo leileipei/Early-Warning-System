@@ -1,6 +1,7 @@
 from datetime import timedelta
 from unittest.mock import Mock
 
+import pytest
 from sqlmodel import Session, select
 
 from app.models import (
@@ -263,3 +264,59 @@ def test_cleanup_expired_logs_uses_utc_now_when_now_is_omitted(session, engine, 
     assert log_service.cleanup_expired_logs(
         lambda: Session(engine), retention_days=180
     ) == 1
+
+
+def test_cleanup_expired_logs_caps_oversized_batches_at_500(session, engine):
+    from app.log_service import cleanup_expired_logs
+
+    rule = _create_rule(session)
+    cutoff_now = utc_now()
+    session.add_all(
+        [
+            ExecutionLog(
+                rule_id=rule.id,
+                trigger_type=TriggerType.MANUAL,
+                status=ExecutionStatus.SUCCESS,
+                finished_at=cutoff_now - timedelta(days=181),
+            )
+            for _ in range(501)
+        ]
+    )
+    session.commit()
+    remaining_after_commits = []
+
+    def tracking_session_factory():
+        tracking_session = Session(engine)
+        original_commit = tracking_session.commit
+
+        def tracking_commit():
+            original_commit()
+            remaining_after_commits.append(
+                len(tracking_session.exec(select(ExecutionLog.id)).all())
+            )
+
+        tracking_session.commit = tracking_commit
+        return tracking_session
+
+    assert cleanup_expired_logs(
+        tracking_session_factory,
+        retention_days=180,
+        now=cutoff_now,
+        batch_size=501,
+    ) == 501
+    deleted_per_transaction = [501 - remaining_after_commits[0]] + [
+        previous - current
+        for previous, current in zip(remaining_after_commits, remaining_after_commits[1:])
+    ]
+
+    assert deleted_per_transaction == [500, 1]
+
+
+@pytest.mark.parametrize("batch_size", [0, -1])
+def test_cleanup_expired_logs_rejects_non_positive_batch_sizes(engine, batch_size):
+    from app.log_service import cleanup_expired_logs
+
+    with pytest.raises(ValueError):
+        cleanup_expired_logs(
+            lambda: Session(engine), retention_days=180, batch_size=batch_size
+        )
