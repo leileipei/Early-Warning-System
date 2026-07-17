@@ -81,9 +81,45 @@ MAX_IMPORTED_RULES = 500
 
 
 def _validate_bounded_int(value: int, *, label: str, minimum: int, maximum: int) -> str | None:
+    if type(value) is not int:
+        return f"{label}必须是整数"
     if not minimum <= value <= maximum:
         return f"{label}必须在 {minimum} 至 {maximum} 之间"
     return None
+
+
+def _parse_bounded_int(
+    value: str,
+    *,
+    label: str,
+    minimum: int,
+    maximum: int,
+) -> tuple[int | None, str | None]:
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return None, f"{label}必须是整数"
+    return parsed, _validate_bounded_int(parsed, label=label, minimum=minimum, maximum=maximum)
+
+
+def _parse_rule_limits(query_timeout_seconds: str, max_rows: str) -> tuple[int | None, int | None, str | None]:
+    parsed_timeout, error = _parse_bounded_int(
+        query_timeout_seconds,
+        label="查询超时",
+        minimum=1,
+        maximum=600,
+    )
+    if error is not None:
+        return None, None, error
+    parsed_max_rows, error = _parse_bounded_int(
+        max_rows,
+        label="最大行数",
+        minimum=1,
+        maximum=5000,
+    )
+    if error is not None:
+        return None, None, error
+    return parsed_timeout, parsed_max_rows, None
 
 
 def _validate_sql_connection_values(port: int, connect_timeout_seconds: int) -> str | None:
@@ -95,6 +131,21 @@ def _validate_sql_connection_values(port: int, connect_timeout_seconds: int) -> 
     )
 
 
+def _parse_sql_connection_values(port: str, connect_timeout_seconds: str) -> tuple[int | None, int | None, str | None]:
+    parsed_port, error = _parse_bounded_int(port, label="端口", minimum=1, maximum=65535)
+    if error is not None:
+        return None, None, error
+    parsed_timeout, error = _parse_bounded_int(
+        connect_timeout_seconds,
+        label="连接超时",
+        minimum=1,
+        maximum=600,
+    )
+    if error is not None:
+        return None, None, error
+    return parsed_port, parsed_timeout, None
+
+
 def _validate_smtp_values(port: int, timeout_seconds: int) -> str | None:
     return _validate_bounded_int(port, label="端口", minimum=1, maximum=65535) or _validate_bounded_int(
         timeout_seconds,
@@ -102,6 +153,21 @@ def _validate_smtp_values(port: int, timeout_seconds: int) -> str | None:
         minimum=1,
         maximum=600,
     )
+
+
+def _parse_smtp_values(port: str, timeout_seconds: str) -> tuple[int | None, int | None, str | None]:
+    parsed_port, error = _parse_bounded_int(port, label="端口", minimum=1, maximum=65535)
+    if error is not None:
+        return None, None, error
+    parsed_timeout, error = _parse_bounded_int(
+        timeout_seconds,
+        label="SMTP 超时",
+        minimum=1,
+        maximum=600,
+    )
+    if error is not None:
+        return None, None, error
+    return parsed_port, parsed_timeout, None
 
 
 def _get_active_rule_or_404(session: Session, rule_id: int) -> AlertRule:
@@ -432,8 +498,8 @@ def _submitted_rule_form(
     subject_template: str,
     body_template: str,
     send_mode: str,
-    query_timeout_seconds: int,
-    max_rows: int,
+    query_timeout_seconds: str,
+    max_rows: str,
     enabled: str | None,
     dynamic_recipient_field: str,
     dynamic_cc_field: str,
@@ -451,8 +517,8 @@ def _submitted_rule_form(
         "subject_template": subject_template,
         "body_template": body_template,
         "send_mode": send_mode,
-        "query_timeout_seconds": str(query_timeout_seconds),
-        "max_rows": str(max_rows),
+        "query_timeout_seconds": query_timeout_seconds,
+        "max_rows": max_rows,
         "enabled": "on" if _is_checked(enabled) else "",
         "dynamic_recipient_field": dynamic_recipient_field.strip(),
         "dynamic_cc_field": dynamic_cc_field.strip(),
@@ -471,16 +537,9 @@ def _validate_rule_form(
     action: str,
     heading: str,
 ):
-    error = _validate_bounded_int(
-        int(form["query_timeout_seconds"]),
-        label="查询超时",
-        minimum=1,
-        maximum=600,
-    ) or _validate_bounded_int(
-        int(form["max_rows"]),
-        label="最大行数",
-        minimum=1,
-        maximum=5000,
+    query_timeout_seconds, max_rows, error = _parse_rule_limits(
+        form["query_timeout_seconds"],
+        form["max_rows"],
     )
     if error is not None:
         return None, None, _template_response(
@@ -497,6 +556,8 @@ def _validate_rule_form(
             ),
             status_code=400,
         )
+    form["query_timeout_seconds"] = str(query_timeout_seconds)
+    form["max_rows"] = str(max_rows)
 
     try:
         validate_select_only_sql(form["sql_text"])
@@ -650,6 +711,8 @@ def _settings_context(
     *,
     error: str = "",
     notice: str = "",
+    sql_form: dict[str, str] | None = None,
+    smtp_form: dict[str, str] | None = None,
 ) -> dict:
     data_sources = session.exec(select(SqlDataSource).order_by(SqlDataSource.created_at.desc())).all()
     smtp_configs = session.exec(select(SmtpConfig).order_by(SmtpConfig.updated_at.desc())).all()
@@ -661,6 +724,8 @@ def _settings_context(
         "smtp_configs": smtp_configs,
         "error": error,
         "notice": notice,
+        "sql_form": sql_form or {},
+        "smtp_form": smtp_form or {},
     }
 
 
@@ -696,15 +761,38 @@ def _smtp_config_to_form(smtp_config: SmtpConfig) -> dict[str, str]:
     }
 
 
+def _submitted_smtp_form(
+    host: str,
+    port: str,
+    username: str,
+    sender: str,
+    use_tls: str | None,
+    use_ssl: str | None,
+    enabled: str | None,
+    timeout_seconds: str,
+) -> dict[str, str]:
+    return {
+        "host": host,
+        "port": port,
+        "username": username,
+        "password": "",
+        "sender": sender,
+        "use_tls": "on" if _is_checked(use_tls) else "",
+        "use_ssl": "on" if _is_checked(use_ssl) else "",
+        "enabled": "on" if _is_checked(enabled) else "",
+        "timeout_seconds": timeout_seconds,
+    }
+
+
 def _submitted_data_source_form(
     name: str,
     host: str,
-    port: int,
+    port: str,
     database: str,
     username: str,
     password: str,
     enabled: str | None,
-    connect_timeout_seconds: int,
+    connect_timeout_seconds: str,
     odbc_driver: str,
     server_override: str,
     encrypt: str,
@@ -714,12 +802,12 @@ def _submitted_data_source_form(
     return {
         "name": name,
         "host": host,
-        "port": str(port),
+        "port": port,
         "database": database,
         "username": username,
         "password": "",
         "enabled": "on" if _is_checked(enabled) else "",
-        "connect_timeout_seconds": str(connect_timeout_seconds),
+        "connect_timeout_seconds": connect_timeout_seconds,
         "odbc_driver": odbc_driver,
         "server_override": server_override,
         "encrypt": encrypt,
@@ -834,8 +922,8 @@ def create_rule(
     subject_template: str = Form(""),
     body_template: str = Form(""),
     send_mode: str = Form(SendMode.SUMMARY.value),
-    query_timeout_seconds: int = Form(30),
-    max_rows: int = Form(500),
+    query_timeout_seconds: str = Form("30"),
+    max_rows: str = Form("500"),
     enabled: str | None = Form(None),
     dynamic_recipient_field: str = Form(""),
     dynamic_cc_field: str = Form(""),
@@ -885,8 +973,8 @@ def create_rule(
         subject_template=subject_template,
         body_template=body_template,
         send_mode=parsed_send_mode,
-        query_timeout_seconds=query_timeout_seconds,
-        max_rows=max_rows,
+        query_timeout_seconds=int(form["query_timeout_seconds"]),
+        max_rows=int(form["max_rows"]),
         enabled=_is_checked(enabled),
         dynamic_recipient_field=dynamic_recipient_field.strip(),
         dynamic_cc_field=dynamic_cc_field.strip(),
@@ -960,12 +1048,12 @@ def validate_rule_sql(
 def preview_rule_sql(
     data_source_id: str = Form(""),
     sql_text: str = Form(""),
-    query_timeout_seconds: int = Form(30),
+    query_timeout_seconds: str = Form("30"),
     admin: AdminUser = Depends(require_admin),
     session: Session = Depends(get_session),
 ):
     _ = admin
-    error = _validate_bounded_int(
+    parsed_timeout, error = _parse_bounded_int(
         query_timeout_seconds,
         label="查询超时",
         minimum=1,
@@ -1011,7 +1099,7 @@ def preview_rule_sql(
     try:
         preview = build_sql_client(data_source).query(
             sql_text,
-            timeout_seconds=query_timeout_seconds,
+            timeout_seconds=parsed_timeout,
             max_rows=5,
         )
     except Exception as exc:
@@ -1114,8 +1202,8 @@ def update_rule(
     subject_template: str = Form(""),
     body_template: str = Form(""),
     send_mode: str = Form(SendMode.SUMMARY.value),
-    query_timeout_seconds: int = Form(30),
-    max_rows: int = Form(500),
+    query_timeout_seconds: str = Form("30"),
+    max_rows: str = Form("500"),
     enabled: str | None = Form(None),
     dynamic_recipient_field: str = Form(""),
     dynamic_cc_field: str = Form(""),
@@ -1167,8 +1255,8 @@ def update_rule(
     rule.subject_template = subject_template
     rule.body_template = body_template
     rule.send_mode = parsed_send_mode
-    rule.query_timeout_seconds = query_timeout_seconds
-    rule.max_rows = max_rows
+    rule.query_timeout_seconds = int(form["query_timeout_seconds"])
+    rule.max_rows = int(form["max_rows"])
     rule.enabled = _is_checked(enabled)
     rule.dynamic_recipient_field = dynamic_recipient_field.strip()
     rule.dynamic_cc_field = dynamic_cc_field.strip()
@@ -1241,12 +1329,12 @@ def create_sql_server_settings(
     request: Request,
     name: str = Form(""),
     host: str = Form(""),
-    port: int = Form(1433),
+    port: str = Form("1433"),
     database: str = Form(""),
     username: str = Form(""),
     password: str = Form(""),
     enabled: str | None = Form(None),
-    connect_timeout_seconds: int = Form(10),
+    connect_timeout_seconds: str = Form("10"),
     odbc_driver: str = Form("ODBC Driver 18 for SQL Server"),
     server_override: str = Form(""),
     encrypt: str = Form("yes"),
@@ -1256,12 +1344,27 @@ def create_sql_server_settings(
     session: Session = Depends(get_session),
 ):
     _ = admin
-    error = _validate_sql_connection_values(port, connect_timeout_seconds)
+    form = _submitted_data_source_form(
+        name,
+        host,
+        port,
+        database,
+        username,
+        password,
+        enabled,
+        connect_timeout_seconds,
+        odbc_driver,
+        server_override,
+        encrypt,
+        trust_server_certificate,
+        extra_params,
+    )
+    parsed_port, parsed_timeout, error = _parse_sql_connection_values(port, connect_timeout_seconds)
     if error is not None:
         return _template_response(
             request,
             "settings.html",
-            _settings_context(request, admin, session, error=error),
+            _settings_context(request, admin, session, error=error, sql_form=form),
             status_code=400,
         )
     existing = session.exec(select(SqlDataSource).where(SqlDataSource.name == name)).first()
@@ -1276,12 +1379,12 @@ def create_sql_server_settings(
     data_source = SqlDataSource(
         name=name,
         host=host,
-        port=port,
+        port=parsed_port,
         database=database,
         username=username,
         encrypted_password=_cipher().encrypt(password),
         enabled=_is_checked(enabled),
-        connect_timeout_seconds=connect_timeout_seconds,
+        connect_timeout_seconds=parsed_timeout,
         odbc_driver=odbc_driver,
         server_override=server_override,
         encrypt=encrypt,
@@ -1397,12 +1500,12 @@ def update_sql_server_settings(
     request: Request,
     name: str = Form(""),
     host: str = Form(""),
-    port: int = Form(1433),
+    port: str = Form("1433"),
     database: str = Form(""),
     username: str = Form(""),
     password: str = Form(""),
     enabled: str | None = Form(None),
-    connect_timeout_seconds: int = Form(10),
+    connect_timeout_seconds: str = Form("10"),
     odbc_driver: str = Form("ODBC Driver 18 for SQL Server"),
     server_override: str = Form(""),
     encrypt: str = Form("yes"),
@@ -1432,7 +1535,7 @@ def update_sql_server_settings(
         trust_server_certificate,
         extra_params,
     )
-    error = _validate_sql_connection_values(port, connect_timeout_seconds)
+    parsed_port, parsed_timeout, error = _parse_sql_connection_values(port, connect_timeout_seconds)
     if error is not None:
         return _template_response(
             request,
@@ -1463,13 +1566,13 @@ def update_sql_server_settings(
 
     data_source.name = name
     data_source.host = host
-    data_source.port = port
+    data_source.port = parsed_port
     data_source.database = database
     data_source.username = username
     if password:
         data_source.encrypted_password = _cipher().encrypt(password)
     data_source.enabled = _is_checked(enabled)
-    data_source.connect_timeout_seconds = connect_timeout_seconds
+    data_source.connect_timeout_seconds = parsed_timeout
     data_source.odbc_driver = odbc_driver
     data_source.server_override = server_override
     data_source.encrypt = encrypt
@@ -1485,36 +1588,46 @@ def update_sql_server_settings(
 def create_smtp_settings(
     request: Request,
     host: str = Form(""),
-    port: int = Form(587),
+    port: str = Form("587"),
     username: str = Form(""),
     password: str = Form(""),
     sender: str = Form(""),
     use_tls: str | None = Form(None),
     use_ssl: str | None = Form(None),
     enabled: str | None = Form(None),
-    timeout_seconds: int = Form(10),
+    timeout_seconds: str = Form("10"),
     admin: AdminUser = Depends(require_admin),
     session: Session = Depends(get_session),
 ):
     _ = admin
-    error = _validate_smtp_values(port, timeout_seconds)
+    form = _submitted_smtp_form(
+        host,
+        port,
+        username,
+        sender,
+        use_tls,
+        use_ssl,
+        enabled,
+        timeout_seconds,
+    )
+    parsed_port, parsed_timeout, error = _parse_smtp_values(port, timeout_seconds)
     if error is not None:
         return _template_response(
             request,
             "settings.html",
-            _settings_context(request, admin, session, error=error),
+            _settings_context(request, admin, session, error=error, smtp_form=form),
             status_code=400,
         )
     smtp_config = SmtpConfig(
         host=host,
-        port=port,
+        port=parsed_port,
         username=username,
         encrypted_password=_cipher().encrypt(password),
         sender=sender,
         use_tls=_is_checked(use_tls),
         use_ssl=_is_checked(use_ssl),
         enabled=_is_checked(enabled),
-        timeout_seconds=timeout_seconds,
+        timeout_seconds=parsed_timeout,
     )
     session.add(smtp_config)
     session.commit()
@@ -1549,14 +1662,14 @@ def update_smtp_settings(
     config_id: int,
     request: Request,
     host: str = Form(""),
-    port: int = Form(587),
+    port: str = Form("587"),
     username: str = Form(""),
     password: str = Form(""),
     sender: str = Form(""),
     use_tls: str | None = Form(None),
     use_ssl: str | None = Form(None),
     enabled: str | None = Form(None),
-    timeout_seconds: int = Form(10),
+    timeout_seconds: str = Form("10"),
     admin: AdminUser = Depends(require_admin),
     session: Session = Depends(get_session),
 ):
@@ -1564,7 +1677,17 @@ def update_smtp_settings(
     smtp_config = session.get(SmtpConfig, config_id)
     if smtp_config is None:
         raise HTTPException(status_code=404, detail="SMTP 配置不存在")
-    error = _validate_smtp_values(port, timeout_seconds)
+    form = _submitted_smtp_form(
+        host,
+        port,
+        username,
+        sender,
+        use_tls,
+        use_ssl,
+        enabled,
+        timeout_seconds,
+    )
+    parsed_port, parsed_timeout, error = _parse_smtp_values(port, timeout_seconds)
     if error is not None:
         return _template_response(
             request,
@@ -1572,17 +1695,7 @@ def update_smtp_settings(
             {
                 "admin": admin,
                 "title": "编辑 SMTP 配置",
-                "form": {
-                    "host": host,
-                    "port": str(port),
-                    "username": username,
-                    "password": "",
-                    "sender": sender,
-                    "use_tls": "on" if _is_checked(use_tls) else "",
-                    "use_ssl": "on" if _is_checked(use_ssl) else "",
-                    "enabled": "on" if _is_checked(enabled) else "",
-                    "timeout_seconds": str(timeout_seconds),
-                },
+                "form": form,
                 "action": f"/settings/smtp/{config_id}",
                 "error": error,
             },
@@ -1590,7 +1703,7 @@ def update_smtp_settings(
         )
 
     smtp_config.host = host
-    smtp_config.port = port
+    smtp_config.port = parsed_port
     smtp_config.username = username
     if password:
         smtp_config.encrypted_password = _cipher().encrypt(password)
@@ -1598,7 +1711,7 @@ def update_smtp_settings(
     smtp_config.use_tls = _is_checked(use_tls)
     smtp_config.use_ssl = _is_checked(use_ssl)
     smtp_config.enabled = _is_checked(enabled)
-    smtp_config.timeout_seconds = timeout_seconds
+    smtp_config.timeout_seconds = parsed_timeout
     smtp_config.updated_at = utc_now()
     session.add(smtp_config)
     session.commit()

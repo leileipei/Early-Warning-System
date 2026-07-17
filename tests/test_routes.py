@@ -3371,3 +3371,131 @@ def test_smtp_forms_reject_out_of_range_values_without_echoing_password(
     finally:
         app.dependency_overrides.clear()
         get_settings.cache_clear()
+
+
+@pytest.mark.parametrize(
+    ("field", "message"),
+    [
+        ("query_timeout_seconds", "查询超时必须是整数"),
+        ("max_rows", "最大行数必须是整数"),
+    ],
+)
+def test_rule_forms_reject_non_numeric_query_limits_with_actionable_400(
+    monkeypatch, session, field, message
+):
+    data_source = _create_data_source(session)
+    rule = _create_rule(session, data_source)
+    client, get_settings, app = _client_with_admin(monkeypatch, session)
+    try:
+        create_form = _valid_rule_form(data_source.id)
+        create_form[field] = "abc"
+        update_form = _valid_rule_form(data_source.id)
+        update_form[field] = "abc"
+
+        create_response = client.post("/rules", data=create_form)
+        update_response = client.post(f"/rules/{rule.id}", data=update_form)
+
+        assert create_response.status_code == 400
+        assert update_response.status_code == 400
+        assert message in create_response.text
+        assert message in update_response.text
+        assert "422 Unprocessable Entity" not in create_response.text
+        assert "422 Unprocessable Entity" not in update_response.text
+    finally:
+        app.dependency_overrides.clear()
+        get_settings.cache_clear()
+
+
+def test_preview_rejects_non_numeric_query_timeout_with_actionable_400(monkeypatch, session):
+    data_source = _create_data_source(session)
+    client, get_settings, app = _client_with_admin(monkeypatch, session)
+    try:
+        response = client.post(
+            "/rules/preview-sql",
+            data={
+                "data_source_id": str(data_source.id),
+                "sql_text": "select 1",
+                "query_timeout_seconds": "abc",
+            },
+        )
+
+        assert response.status_code == 400
+        assert response.json() == {"success": False, "message": "查询超时必须是整数"}
+    finally:
+        app.dependency_overrides.clear()
+        get_settings.cache_clear()
+
+
+@pytest.mark.parametrize(
+    ("field", "message"),
+    [
+        ("port", "端口必须是整数"),
+        ("connect_timeout_seconds", "连接超时必须是整数"),
+    ],
+)
+def test_sql_server_forms_reject_non_numeric_values_with_safe_400(
+    monkeypatch, session, field, message
+):
+    data_source = _create_data_source(session)
+    form_data = {
+        "name": data_source.name,
+        "host": data_source.host,
+        "port": "1433",
+        "database": data_source.database,
+        "username": data_source.username,
+        "password": "never-render-this-password",
+        "connect_timeout_seconds": "10",
+    }
+    form_data[field] = "abc"
+    client, get_settings, app = _client_with_admin(monkeypatch, session)
+    try:
+        create_response = client.post("/settings/sql-server", data={**form_data, "name": "新生产库"})
+        update_response = client.post(f"/settings/sql-server/{data_source.id}", data=form_data)
+
+        assert create_response.status_code == 400
+        assert update_response.status_code == 400
+        assert message in create_response.text
+        assert message in update_response.text
+        assert 'value="abc"' in create_response.text
+        assert 'value="abc"' in update_response.text
+        assert "never-render-this-password" not in create_response.text
+        assert "never-render-this-password" not in update_response.text
+    finally:
+        app.dependency_overrides.clear()
+        get_settings.cache_clear()
+
+
+@pytest.mark.parametrize(
+    ("field", "message"),
+    [
+        ("port", "端口必须是整数"),
+        ("timeout_seconds", "SMTP 超时必须是整数"),
+    ],
+)
+def test_smtp_forms_reject_non_numeric_values_with_safe_400(monkeypatch, session, field, message):
+    smtp_config = _create_smtp_config(session)
+    form_data = {
+        "host": smtp_config.host,
+        "port": "587",
+        "username": smtp_config.username,
+        "password": "never-render-this-password",
+        "sender": smtp_config.sender,
+        "timeout_seconds": "10",
+    }
+    form_data[field] = "abc"
+    client, get_settings, app = _client_with_admin(monkeypatch, session)
+    try:
+        create_response = client.post("/settings/smtp", data=form_data)
+        update_response = client.post(f"/settings/smtp/{smtp_config.id}", data=form_data)
+
+        assert create_response.status_code == 400
+        assert update_response.status_code == 400
+        assert message in create_response.text
+        assert message in update_response.text
+        assert 'value="abc"' in create_response.text
+        assert 'value="abc"' in update_response.text
+        assert "never-render-this-password" not in create_response.text
+        assert "never-render-this-password" not in update_response.text
+    finally:
+        app.dependency_overrides.clear()
+        get_settings.cache_clear()

@@ -16,6 +16,9 @@
 <p class="form-success">{{ notice }}</p>
 {% endif %}
 
+{% set sql_form = sql_form or {} %}
+{% set smtp_form = smtp_form or {} %}
+
 <section class="two-column">
   <article class="panel">
     <h2>SQL Server</h2>
@@ -24,25 +27,25 @@
         {{ csrf_input(csrf_token) }}
         <label>
           <span>名称</span>
-          <input name="name" required>
+          <input name="name" value="{{ sql_form.get('name', '') }}" required>
         </label>
         <label>
           <span>主机</span>
-          <input name="host" required>
+          <input name="host" value="{{ sql_form.get('host', '') }}" required>
         </label>
         <label>
           <span>端口</span>
-          <input name="port" type="number" value="1433" min="1" max="65535" required>
+          <input name="port" type="number" value="{{ sql_form.get('port', '1433') }}" min="1" max="65535" required>
         </label>
         <label>
           <span>数据库</span>
-          <input name="database" required>
+          <input name="database" value="{{ sql_form.get('database', '') }}" required>
         </label>
       </section>
       <section class="form-section">
         <label>
           <span>用户名</span>
-          <input name="username" required>
+          <input name="username" value="{{ sql_form.get('username', '') }}" required>
         </label>
         <label>
           <span>密码</span>
@@ -52,40 +55,40 @@
       <section class="form-section">
         <label>
           <span>连接超时（秒）</span>
-          <input name="connect_timeout_seconds" type="number" value="10" min="1" max="600">
+          <input name="connect_timeout_seconds" type="number" value="{{ sql_form.get('connect_timeout_seconds', '10') }}" min="1" max="600">
         </label>
         <label>
           <span>ODBC 驱动</span>
-          <input name="odbc_driver" value="ODBC Driver 18 for SQL Server" required>
+          <input name="odbc_driver" value="{{ sql_form.get('odbc_driver', 'ODBC Driver 18 for SQL Server') }}" required>
         </label>
         <label>
           <span>服务器地址覆盖值</span>
-          <input name="server_override" placeholder="可选，例如 SERVER\INSTANCE 或 192.168.1.10,1433">
+          <input name="server_override" value="{{ sql_form.get('server_override', '') }}" placeholder="可选，例如 SERVER\INSTANCE 或 192.168.1.10,1433">
         </label>
         <div class="form-row">
           <label>
             <span>Encrypt</span>
             <select name="encrypt">
-              <option value="yes" selected>yes</option>
-              <option value="no">no</option>
-              <option value="optional">optional</option>
+              <option value="yes"{% if sql_form.get('encrypt', 'yes') == 'yes' %} selected{% endif %}>yes</option>
+              <option value="no"{% if sql_form.get('encrypt') == 'no' %} selected{% endif %}>no</option>
+              <option value="optional"{% if sql_form.get('encrypt') == 'optional' %} selected{% endif %}>optional</option>
             </select>
           </label>
           <label>
             <span>TrustServerCertificate</span>
             <select name="trust_server_certificate">
-              <option value="yes">yes</option>
-              <option value="no" selected>no</option>
+              <option value="yes"{% if sql_form.get('trust_server_certificate') == 'yes' %} selected{% endif %}>yes</option>
+              <option value="no"{% if sql_form.get('trust_server_certificate', 'no') == 'no' %} selected{% endif %}>no</option>
             </select>
           </label>
         </div>
         <label>
           <span>额外连接参数</span>
-          <input name="extra_params" placeholder="例如 ApplicationIntent=ReadOnly;MultiSubnetFailover=Yes;">
+          <input name="extra_params" value="{{ sql_form.get('extra_params', '') }}" placeholder="例如 ApplicationIntent=ReadOnly;MultiSubnetFailover=Yes;">
         </label>
         <label>
           <span>启用</span>
-          <input name="enabled" type="checkbox" checked>
+          <input name="enabled" type="checkbox" {% if sql_form.get('enabled', 'on') %}checked{% endif %}>
         </label>
       </section>
       <div class="button-row form-actions">
@@ -145,17 +148,17 @@
         {{ csrf_input(csrf_token) }}
         <label>
           <span>服务器</span>
-          <input name="host" required>
+          <input name="host" value="{{ smtp_form.get('host', '') }}" required>
         </label>
         <label>
           <span>端口</span>
-          <input name="port" type="number" value="587" min="1" max="65535" required>
+          <input name="port" type="number" value="{{ smtp_form.get('port', '587') }}" min="1" max="65535" required>
         </label>
       </section>
       <section class="form-section">
         <label>
           <span>用户名</span>
-          <input name="username" required>
+          <input name="username" value="{{ smtp_form.get('username', '') }}" required>
         </label>
         <label>
           <span>密码</span>
@@ -163,25 +166,25 @@
         </label>
         <label>
           <span>发件人</span>
-          <input name="sender" required>
+          <input name="sender" value="{{ smtp_form.get('sender', '') }}" required>
         </label>
         <label>
           <span>超时（秒）</span>
-          <input name="timeout_seconds" type="number" value="10" min="1" max="600">
+          <input name="timeout_seconds" type="number" value="{{ smtp_form.get('timeout_seconds', '10') }}" min="1" max="600">
         </label>
       </section>
       <section class="form-section">
         <label>
           <span>TLS</span>
-          <input name="use_tls" type="checkbox" checked>
+          <input name="use_tls" type="checkbox" {% if smtp_form.get('use_tls', 'on') %}checked{% endif %}>
         </label>
         <label>
           <span>SSL</span>
-          <input name="use_ssl" type="checkbox">
+          <input name="use_ssl" type="checkbox" {% if smtp_form.get('use_ssl') %}checked{% endif %}>
         </label>
         <label>
           <span>启用</span>
-          <input name="enabled" type="checkbox" checked>
+          <input name="enabled" type="checkbox" {% if smtp_form.get('enabled', 'on') %}checked{% endif %}>
         </label>
       </section>
       <div class="button-row form-actions">
