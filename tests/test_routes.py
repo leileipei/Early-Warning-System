@@ -2569,6 +2569,76 @@ def test_enabling_smtp_config_disables_other_enabled_config(monkeypatch, session
         get_settings.cache_clear()
 
 
+def test_creating_enabled_smtp_config_rolls_back_when_commit_fails(monkeypatch, session):
+    existing = _create_smtp_config(session)
+    commit = Mock(side_effect=RuntimeError("injected commit failure"))
+    rollback = Mock(wraps=session.rollback)
+    monkeypatch.setattr(session, "commit", commit)
+    monkeypatch.setattr(session, "rollback", rollback)
+    client, get_settings, app = _client_with_admin(monkeypatch, session)
+    try:
+        response = TestClient(app, raise_server_exceptions=False).post(
+            "/settings/smtp",
+            data={
+                "host": "replacement.example.com",
+                "port": "587",
+                "username": "mailer",
+                "password": "smtp-password",
+                "sender": "alerts@example.com",
+                "enabled": "on",
+                "timeout_seconds": "10",
+            },
+            follow_redirects=False,
+        )
+
+        assert response.status_code == 500
+        commit.assert_called_once_with()
+        rollback.assert_called_once_with()
+        with Session(session.get_bind()) as verification_session:
+            configs = verification_session.exec(select(SmtpConfig).order_by(SmtpConfig.id)).all()
+        assert [(config.id, config.enabled) for config in configs] == [(existing.id, True)]
+    finally:
+        app.dependency_overrides.clear()
+        get_settings.cache_clear()
+
+
+def test_enabling_smtp_config_rolls_back_when_commit_fails(monkeypatch, session):
+    existing = _create_smtp_config(session)
+    replacement = _create_smtp_config(session, enabled=False)
+    commit = Mock(side_effect=RuntimeError("injected commit failure"))
+    rollback = Mock(wraps=session.rollback)
+    monkeypatch.setattr(session, "commit", commit)
+    monkeypatch.setattr(session, "rollback", rollback)
+    client, get_settings, app = _client_with_admin(monkeypatch, session)
+    try:
+        response = TestClient(app, raise_server_exceptions=False).post(
+            f"/settings/smtp/{replacement.id}",
+            data={
+                "host": "replacement.example.com",
+                "port": "465",
+                "username": "replacement-mailer",
+                "password": "replacement-password",
+                "sender": "replacement@example.com",
+                "enabled": "on",
+                "timeout_seconds": "20",
+            },
+            follow_redirects=False,
+        )
+
+        assert response.status_code == 500
+        commit.assert_called_once_with()
+        rollback.assert_called_once_with()
+        with Session(session.get_bind()) as verification_session:
+            configs = verification_session.exec(select(SmtpConfig).order_by(SmtpConfig.id)).all()
+        assert [(config.id, config.enabled) for config in configs] == [
+            (existing.id, True),
+            (replacement.id, False),
+        ]
+    finally:
+        app.dependency_overrides.clear()
+        get_settings.cache_clear()
+
+
 @pytest.mark.parametrize(
     ("use_tls", "use_ssl", "expected_status"),
     [("on", "on", 400), ("on", None, 303), (None, "on", 303), (None, None, 303)],
@@ -2621,6 +2691,43 @@ def test_updating_smtp_config_rejects_combined_tls_and_ssl(monkeypatch, session)
         assert response.status_code == 400
         assert "TLS 和 SSL 不能同时启用" in response.text
         assert "never-render-this-password" not in response.text
+    finally:
+        app.dependency_overrides.clear()
+        get_settings.cache_clear()
+
+
+@pytest.mark.parametrize(
+    ("use_tls", "use_ssl"),
+    [(True, False), (False, True), (False, False)],
+)
+def test_updating_smtp_config_saves_legal_tls_ssl_combinations(
+    monkeypatch, session, use_tls, use_ssl
+):
+    smtp_config = _create_smtp_config(session)
+    client, get_settings, app = _client_with_admin(monkeypatch, session)
+    try:
+        form = {
+            "host": smtp_config.host,
+            "port": "587",
+            "username": smtp_config.username,
+            "password": "",
+            "sender": smtp_config.sender,
+            "timeout_seconds": "10",
+        }
+        if use_tls:
+            form["use_tls"] = "on"
+        if use_ssl:
+            form["use_ssl"] = "on"
+
+        response = client.post(
+            f"/settings/smtp/{smtp_config.id}",
+            data=form,
+            follow_redirects=False,
+        )
+
+        assert response.status_code == 303
+        session.expire(smtp_config)
+        assert (smtp_config.use_tls, smtp_config.use_ssl) == (use_tls, use_ssl)
     finally:
         app.dependency_overrides.clear()
         get_settings.cache_clear()
