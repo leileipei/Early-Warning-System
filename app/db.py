@@ -19,6 +19,11 @@ _LOG_INDEX_STATEMENTS = (
     "CREATE INDEX IF NOT EXISTS ix_maillog_execution_log_id ON maillog (execution_log_id)",
 )
 
+_SMTP_SINGLE_ENABLED_INDEX_STATEMENT = (
+    "CREATE UNIQUE INDEX IF NOT EXISTS uq_smtpconfig_single_enabled "
+    "ON smtpconfig(enabled) WHERE enabled = 1"
+)
+
 
 def create_db_engine(database_url: str | None = None) -> Engine:
     url = database_url or get_settings().database_url
@@ -132,6 +137,20 @@ def _migrate_sqlite_schema(connection: Connection) -> None:
         for column_name, ddl in rule_columns_to_add.items():
             if column_name not in existing_rule_columns:
                 connection.execute(text(f"ALTER TABLE alertrule ADD COLUMN {column_name} {ddl}"))
+
+    if "smtpconfig" in table_names:
+        connection.exec_driver_sql(
+            "UPDATE smtpconfig "
+            "SET enabled = 0 "
+            "WHERE enabled = 1 "
+            "AND id <> ("
+            "SELECT id FROM smtpconfig "
+            "WHERE enabled = 1 "
+            "ORDER BY updated_at DESC, id DESC "
+            "LIMIT 1"
+            ")"
+        )
+        connection.exec_driver_sql(_SMTP_SINGLE_ENABLED_INDEX_STATEMENT)
 
     heartbeat_columns = {
         "id",

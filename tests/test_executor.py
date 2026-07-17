@@ -3,6 +3,7 @@ from threading import Barrier, Event, Lock
 from types import SimpleNamespace
 
 import pytest
+from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, select
 
@@ -191,6 +192,32 @@ def persist_smtp_config(session):
     session.commit()
     session.refresh(smtp_config)
     return smtp_config
+
+
+def test_get_enabled_smtp_config_rejects_conflicting_enabled_configs(session):
+    session.exec(text("DROP INDEX IF EXISTS uq_smtpconfig_single_enabled"))
+    session.add_all(
+        [
+            SmtpConfig(
+                host="first.example.com",
+                username="mailer",
+                encrypted_password="encrypted",
+                sender="alerts@example.com",
+                enabled=True,
+            ),
+            SmtpConfig(
+                host="second.example.com",
+                username="mailer",
+                encrypted_password="encrypted",
+                sender="alerts@example.com",
+                enabled=True,
+            ),
+        ]
+    )
+    session.commit()
+
+    with pytest.raises(execution_service.ConfigurationError, match="冲突"):
+        execution_service._get_enabled_smtp_config(session)
 
 
 def persist_rule(session, data_source, **overrides):

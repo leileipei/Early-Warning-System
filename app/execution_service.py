@@ -325,14 +325,16 @@ def _get_enabled_data_source(session: Session, rule: AlertRule) -> SqlDataSource
 
 
 def _get_enabled_smtp_config(session: Session) -> SmtpConfig:
-    smtp_config = session.exec(
+    smtp_configs = session.exec(
         select(SmtpConfig)
         .where(SmtpConfig.enabled == True)  # noqa: E712
-        .order_by(SmtpConfig.updated_at.desc())
-    ).first()
-    if smtp_config is None:
+        .limit(2)
+    ).all()
+    if not smtp_configs:
         raise ConfigurationError("未配置可用的 SMTP 服务")
-    return smtp_config
+    if len(smtp_configs) > 1:
+        raise ConfigurationError("启用的 SMTP 配置冲突")
+    return smtp_configs[0]
 
 
 def _cipher() -> SecretCipher:

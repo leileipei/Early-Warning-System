@@ -410,3 +410,7 @@ export SSL_CERT_FILE=/absolute/path/company-ca.pem
 ```
 
 证书中的主机名必须与 SMTP 配置页面填写的主机一致。系统不提供跳过 SMTP 证书校验的开关。
+
+### 20.3 SMTP 启用项升级
+
+升级时，系统会自动整理旧 SQLite 数据库中的 SMTP 配置：若存在多个启用项，只保留 `updated_at` 最新的一项；更新时间相同时保留 ID 最大的一项，其余项会被禁用。升级完成后数据库保证最多只能有一个启用 SMTP 配置。

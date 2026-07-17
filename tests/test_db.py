@@ -16,6 +16,7 @@ from app.models import (
     ExecutionLog,
     RuleExecutionLease,
     SendMode,
+    SmtpConfig,
     SqlDataSource,
     TriggerType,
     WorkerHeartbeat,
@@ -210,6 +211,92 @@ def test_init_db_adds_log_indexes_to_existing_sqlite_database(tmp_path):
         "ix_maillog_status",
         "ix_maillog_execution_log_id",
     } <= {index["name"] for index in inspect(engine).get_indexes("maillog")}
+
+
+def test_init_db_keeps_newest_enabled_smtp_config_and_creates_unique_index(tmp_path):
+    from app.db import create_db_engine, init_db
+
+    database_path = tmp_path / "legacy-smtp.sqlite3"
+    engine = create_db_engine(f"sqlite:///{database_path}")
+    SQLModel.metadata.create_all(engine)
+    with engine.begin() as connection:
+        connection.execute(
+            text(
+                "INSERT INTO smtpconfig "
+                "(id, host, port, username, encrypted_password, sender, use_tls, use_ssl, "
+                "timeout_seconds, enabled, updated_at) VALUES "
+                "(1, 'old.example.com', 587, 'mailer', 'encrypted', 'alerts@example.com', "
+                "1, 0, 10, 1, '2026-01-01 00:00:00'), "
+                "(2, 'newer.example.com', 587, 'mailer', 'encrypted', 'alerts@example.com', "
+                "1, 0, 10, 1, '2026-01-02 00:00:00'), "
+                "(3, 'latest-id.example.com', 587, 'mailer', 'encrypted', 'alerts@example.com', "
+                "1, 0, 10, 1, '2026-01-02 00:00:00')"
+            )
+        )
+
+    init_db(engine)
+    init_db(engine)
+
+    with Session(engine) as session:
+        enabled_configs = session.exec(
+            select(SmtpConfig).where(SmtpConfig.enabled == True)  # noqa: E712
+        ).all()
+        assert [config.id for config in enabled_configs] == [3]
+        session.add(
+            SmtpConfig(
+                host="conflict.example.com",
+                username="mailer",
+                encrypted_password="encrypted",
+                sender="alerts@example.com",
+                enabled=True,
+            )
+        )
+        with pytest.raises(IntegrityError):
+            session.commit()
+
+    assert "uq_smtpconfig_single_enabled" in {
+        index["name"] for index in inspect(engine).get_indexes("smtpconfig")
+    }
+
+
+def test_init_db_rolls_back_smtp_cleanup_when_unique_index_creation_fails(tmp_path):
+    from app.db import create_db_engine, init_db
+
+    database_path = tmp_path / "failed-smtp-migration.sqlite3"
+    engine = create_db_engine(f"sqlite:///{database_path}")
+    SQLModel.metadata.create_all(engine)
+    with engine.begin() as connection:
+        connection.execute(
+            text(
+                "INSERT INTO smtpconfig "
+                "(id, host, port, username, encrypted_password, sender, use_tls, use_ssl, "
+                "timeout_seconds, enabled, updated_at) VALUES "
+                "(1, 'first.example.com', 587, 'mailer', 'encrypted', 'alerts@example.com', "
+                "1, 0, 10, 1, '2026-01-01 00:00:00'), "
+                "(2, 'second.example.com', 587, 'mailer', 'encrypted', 'alerts@example.com', "
+                "1, 0, 10, 1, '2026-01-02 00:00:00')"
+            )
+        )
+
+    def fail_unique_index(_connection, _cursor, statement, _parameters, _context, _executemany):
+        if "CREATE UNIQUE INDEX IF NOT EXISTS uq_smtpconfig_single_enabled" in statement:
+            raise RuntimeError("injected smtp index creation failure")
+
+    event.listen(engine, "before_cursor_execute", fail_unique_index)
+    try:
+        with pytest.raises(RuntimeError, match="smtp index creation failure"):
+            init_db(engine)
+    finally:
+        event.remove(engine, "before_cursor_execute", fail_unique_index)
+
+    with engine.connect() as connection:
+        enabled_ids = connection.execute(
+            text("SELECT id FROM smtpconfig WHERE enabled = 1 ORDER BY id")
+        ).scalars().all()
+    assert enabled_ids == [1, 2]
+    assert "uq_smtpconfig_single_enabled" not in {
+        index["name"] for index in inspect(engine).get_indexes("smtpconfig")
+    }
 
 
 def test_init_db_rolls_back_sqlite_upgrade_when_worker_heartbeat_index_creation_fails(tmp_path):

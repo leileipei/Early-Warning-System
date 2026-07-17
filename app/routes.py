@@ -10,6 +10,7 @@ from fastapi.responses import (
     StreamingResponse,
 )
 from fastapi.templating import Jinja2Templates
+from sqlalchemy import update
 from sqlmodel import Session, select
 
 from app.auth import require_admin
@@ -782,6 +783,13 @@ def _submitted_smtp_form(
         "enabled": "on" if _is_checked(enabled) else "",
         "timeout_seconds": timeout_seconds,
     }
+
+
+def _disable_other_smtp_configs(session: Session, *, keep_id: int | None) -> None:
+    statement = update(SmtpConfig).where(SmtpConfig.enabled == True)  # noqa: E712
+    if keep_id is not None:
+        statement = statement.where(SmtpConfig.id != keep_id)
+    session.exec(statement.values(enabled=False))
 
 
 def _submitted_data_source_form(
@@ -1611,6 +1619,10 @@ def create_smtp_settings(
         timeout_seconds,
     )
     parsed_port, parsed_timeout, error = _parse_smtp_values(port, timeout_seconds)
+    use_tls_enabled = _is_checked(use_tls)
+    use_ssl_enabled = _is_checked(use_ssl)
+    if error is None and use_tls_enabled and use_ssl_enabled:
+        error = "TLS 和 SSL 不能同时启用"
     if error is not None:
         return _template_response(
             request,
@@ -1624,13 +1636,19 @@ def create_smtp_settings(
         username=username,
         encrypted_password=_cipher().encrypt(password),
         sender=sender,
-        use_tls=_is_checked(use_tls),
-        use_ssl=_is_checked(use_ssl),
+        use_tls=use_tls_enabled,
+        use_ssl=use_ssl_enabled,
         enabled=_is_checked(enabled),
         timeout_seconds=parsed_timeout,
     )
-    session.add(smtp_config)
-    session.commit()
+    try:
+        if smtp_config.enabled:
+            _disable_other_smtp_configs(session, keep_id=None)
+        session.add(smtp_config)
+        session.commit()
+    except Exception:
+        session.rollback()
+        raise
     return RedirectResponse("/settings", status_code=303)
 
 
@@ -1688,6 +1706,10 @@ def update_smtp_settings(
         timeout_seconds,
     )
     parsed_port, parsed_timeout, error = _parse_smtp_values(port, timeout_seconds)
+    use_tls_enabled = _is_checked(use_tls)
+    use_ssl_enabled = _is_checked(use_ssl)
+    if error is None and use_tls_enabled and use_ssl_enabled:
+        error = "TLS 和 SSL 不能同时启用"
     if error is not None:
         return _template_response(
             request,
@@ -1702,19 +1724,25 @@ def update_smtp_settings(
             status_code=400,
         )
 
-    smtp_config.host = host
-    smtp_config.port = parsed_port
-    smtp_config.username = username
-    if password:
-        smtp_config.encrypted_password = _cipher().encrypt(password)
-    smtp_config.sender = sender
-    smtp_config.use_tls = _is_checked(use_tls)
-    smtp_config.use_ssl = _is_checked(use_ssl)
-    smtp_config.enabled = _is_checked(enabled)
-    smtp_config.timeout_seconds = parsed_timeout
-    smtp_config.updated_at = utc_now()
-    session.add(smtp_config)
-    session.commit()
+    try:
+        if _is_checked(enabled):
+            _disable_other_smtp_configs(session, keep_id=smtp_config.id)
+        smtp_config.host = host
+        smtp_config.port = parsed_port
+        smtp_config.username = username
+        if password:
+            smtp_config.encrypted_password = _cipher().encrypt(password)
+        smtp_config.sender = sender
+        smtp_config.use_tls = use_tls_enabled
+        smtp_config.use_ssl = use_ssl_enabled
+        smtp_config.enabled = _is_checked(enabled)
+        smtp_config.timeout_seconds = parsed_timeout
+        smtp_config.updated_at = utc_now()
+        session.add(smtp_config)
+        session.commit()
+    except Exception:
+        session.rollback()
+        raise
     return RedirectResponse("/settings", status_code=303)
 
 

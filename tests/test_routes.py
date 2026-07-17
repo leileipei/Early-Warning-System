@@ -2513,6 +2513,119 @@ def test_create_smtp_settings_encrypts_password(monkeypatch, session):
         get_settings.cache_clear()
 
 
+def test_creating_enabled_smtp_config_disables_existing_enabled_config(monkeypatch, session):
+    existing = _create_smtp_config(session)
+    client, get_settings, app = _client_with_admin(monkeypatch, session)
+    try:
+        response = client.post(
+            "/settings/smtp",
+            data={
+                "host": "replacement.example.com",
+                "port": "587",
+                "username": "mailer",
+                "password": "smtp-password",
+                "sender": "alerts@example.com",
+                "enabled": "on",
+                "timeout_seconds": "10",
+            },
+            follow_redirects=False,
+        )
+
+        assert response.status_code == 303
+        configs = session.exec(select(SmtpConfig).order_by(SmtpConfig.id)).all()
+        assert [(config.id, config.enabled) for config in configs] == [
+            (existing.id, False),
+            (configs[1].id, True),
+        ]
+    finally:
+        app.dependency_overrides.clear()
+        get_settings.cache_clear()
+
+
+def test_enabling_smtp_config_disables_other_enabled_config(monkeypatch, session):
+    existing = _create_smtp_config(session)
+    replacement = _create_smtp_config(session, enabled=False)
+    client, get_settings, app = _client_with_admin(monkeypatch, session)
+    try:
+        response = client.post(
+            f"/settings/smtp/{replacement.id}",
+            data={
+                "host": replacement.host,
+                "port": "587",
+                "username": replacement.username,
+                "password": "",
+                "sender": replacement.sender,
+                "enabled": "on",
+                "timeout_seconds": "10",
+            },
+            follow_redirects=False,
+        )
+
+        assert response.status_code == 303
+        assert session.get(SmtpConfig, existing.id).enabled is False
+        assert session.get(SmtpConfig, replacement.id).enabled is True
+    finally:
+        app.dependency_overrides.clear()
+        get_settings.cache_clear()
+
+
+@pytest.mark.parametrize(
+    ("use_tls", "use_ssl", "expected_status"),
+    [("on", "on", 400), ("on", None, 303), (None, "on", 303), (None, None, 303)],
+)
+def test_smtp_form_rejects_combined_tls_and_ssl(monkeypatch, session, use_tls, use_ssl, expected_status):
+    client, get_settings, app = _client_with_admin(monkeypatch, session)
+    try:
+        form = {
+            "host": "smtp.example.com",
+            "port": "587",
+            "username": "mailer",
+            "password": "never-render-this-password",
+            "sender": "alerts@example.com",
+            "timeout_seconds": "10",
+        }
+        if use_tls is not None:
+            form["use_tls"] = use_tls
+        if use_ssl is not None:
+            form["use_ssl"] = use_ssl
+
+        response = client.post("/settings/smtp", data=form, follow_redirects=False)
+
+        assert response.status_code == expected_status
+        if expected_status == 400:
+            assert "TLS 和 SSL 不能同时启用" in response.text
+            assert "never-render-this-password" not in response.text
+    finally:
+        app.dependency_overrides.clear()
+        get_settings.cache_clear()
+
+
+def test_updating_smtp_config_rejects_combined_tls_and_ssl(monkeypatch, session):
+    smtp_config = _create_smtp_config(session)
+    client, get_settings, app = _client_with_admin(monkeypatch, session)
+    try:
+        response = client.post(
+            f"/settings/smtp/{smtp_config.id}",
+            data={
+                "host": smtp_config.host,
+                "port": "587",
+                "username": smtp_config.username,
+                "password": "never-render-this-password",
+                "sender": smtp_config.sender,
+                "use_tls": "on",
+                "use_ssl": "on",
+                "timeout_seconds": "10",
+            },
+        )
+
+        assert response.status_code == 400
+        assert "TLS 和 SSL 不能同时启用" in response.text
+        assert "never-render-this-password" not in response.text
+    finally:
+        app.dependency_overrides.clear()
+        get_settings.cache_clear()
+
+
 def test_logs_page_lists_execution_and_mail_logs(monkeypatch, session):
     data_source = _create_data_source(session)
     rule = AlertRule(
