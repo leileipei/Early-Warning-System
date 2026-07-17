@@ -126,3 +126,31 @@ def test_readiness_hides_database_exception_details(client, monkeypatch, engine)
     assert database_url not in response.text
     assert "/private/secret" not in response.text
     assert "RuntimeError" not in response.text
+
+
+def test_readiness_hides_engine_creation_exception_details(monkeypatch):
+    database_url = "postgresql://operator:super-secret@db.internal/alerts"
+    monkeypatch.setenv("SESSION_SECRET", "test-session-secret-with-32-bytes")
+    monkeypatch.setenv("SECRET_KEY", VALID_FERNET_KEY)
+    from app.settings import get_settings
+
+    get_settings.cache_clear()
+    import app.main as main
+
+    def fail_get_engine():
+        raise RuntimeError(f"unable to create engine for {database_url} /private/secret")
+
+    monkeypatch.setattr(main, "get_engine", fail_get_engine)
+    try:
+        response = TestClient(main.create_app(), raise_server_exceptions=False).get("/health/ready")
+    finally:
+        get_settings.cache_clear()
+
+    assert response.status_code == 503
+    assert response.json() == {
+        "status": "not_ready",
+        "components": {"database": "unavailable", "worker": "unknown"},
+    }
+    assert database_url not in response.text
+    assert "/private/secret" not in response.text
+    assert "RuntimeError" not in response.text

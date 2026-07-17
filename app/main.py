@@ -6,7 +6,7 @@ from starlette.middleware.sessions import SessionMiddleware
 
 from app.auth import router as auth_router
 from app.db import get_engine
-from app.health import check_readiness
+from app.health import ReadinessResult, check_readiness
 from app.paths import STATIC_DIR
 from app.routes import router as page_router
 from app.settings import get_settings
@@ -48,10 +48,17 @@ def create_app() -> FastAPI:
 
     @app.get("/health/ready")
     def readiness(response: Response) -> dict[str, object]:
-        result = check_readiness(
-            get_engine(),
-            heartbeat_timeout_seconds=settings.worker_heartbeat_timeout_seconds,
-        )
+        try:
+            engine = get_engine()
+        except Exception:
+            result = ReadinessResult(
+                False, {"database": "unavailable", "worker": "unknown"}
+            )
+        else:
+            result = check_readiness(
+                engine,
+                heartbeat_timeout_seconds=settings.worker_heartbeat_timeout_seconds,
+            )
         if not result.ready:
             response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE
         return {

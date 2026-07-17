@@ -23,3 +23,9 @@ Status: complete
 
 - Added `app/health.py`, `tests/test_health.py`; updated `app/main.py`, `app/worker.py`, `tests/test_worker.py`, `tests/test_scheduler.py`.
 - Reviewed injection boundaries, response disclosure, required table names, stale/failed worker handling, and scheduler continuity. No Task 7 log-cleanup behavior was added.
+
+## Review Fix: Engine Creation Failure
+
+- RED: `test_readiness_hides_engine_creation_exception_details` monkeypatched `app.main.get_engine` to raise an exception containing a database URL and local path. Before the fix it failed with `500 != 503`.
+- GREEN: `/health/ready` now converts only `get_engine()` exceptions into `ReadinessResult(False, {"database": "unavailable", "worker": "unknown"})`; it leaves other route exception handling unchanged.
+- Verification: `PYTHONPATH=. /Users/leo.cui/Documents/Early Warning System/.venv/bin/python -m pytest tests/test_health.py tests/test_worker.py -q` -> 16 passed; `PYTHONPATH=. /Users/leo.cui/Documents/Early Warning System/.venv/bin/python -m ruff check .` -> passed.
