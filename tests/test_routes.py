@@ -40,15 +40,31 @@ SECURITY_HEADERS = {
     "permissions-policy": "camera=(), microphone=(), geolocation=()",
     "x-frame-options": "DENY",
 }
+CONTENT_SECURITY_POLICY_DIRECTIVES = frozenset(
+    {
+        "default-src 'self'",
+        "script-src 'self'",
+        "style-src 'self'",
+        "img-src 'self' data:",
+        "connect-src 'self'",
+        "object-src 'none'",
+        "base-uri 'self'",
+        "form-action 'self'",
+        "frame-ancestors 'none'",
+    }
+)
 
 
 def _assert_security_headers(response, *, hsts: bool = False):
     for header, value in SECURITY_HEADERS.items():
         assert response.headers[header] == value
-    assert "default-src 'self'" in response.headers["content-security-policy"]
-    assert "script-src 'self'" in response.headers["content-security-policy"]
-    assert "'unsafe-inline'" not in response.headers["content-security-policy"]
-    assert "frame-ancestors 'none'" in response.headers["content-security-policy"]
+    csp_directives = frozenset(
+        directive.strip()
+        for directive in response.headers["content-security-policy"].split(";")
+        if directive.strip()
+    )
+    assert csp_directives == CONTENT_SECURITY_POLICY_DIRECTIVES
+    assert "'unsafe-inline'" not in csp_directives
     if hsts:
         assert response.headers["strict-transport-security"] == "max-age=31536000; includeSubDomains"
     else:
