@@ -41,6 +41,8 @@ def _add_rule_job(
     scheduler,
     rule: AlertRule,
     execute_rule: Callable[[int], None],
+    *,
+    misfire_grace_seconds: int,
 ) -> None:
     scheduler.add_job(
         execute_rule,
@@ -50,14 +52,23 @@ def _add_rule_job(
         replace_existing=True,
         max_instances=1,
         coalesce=True,
+        misfire_grace_time=misfire_grace_seconds,
     )
 
 
 class RuleScheduleSynchronizer:
-    def __init__(self, scheduler, execute_rule: Callable[[int], None], logger=None):
+    def __init__(
+        self,
+        scheduler,
+        execute_rule: Callable[[int], None],
+        logger=None,
+        *,
+        misfire_grace_seconds: int = 300,
+    ):
         self.scheduler = scheduler
         self.execute_rule = execute_rule
         self.logger = logger or logging.getLogger(__name__)
+        self.misfire_grace_seconds = misfire_grace_seconds
         self.known_cron_by_rule_id: dict[int, str] = {}
         for job in scheduler.get_jobs():
             rule_id = _rule_id_from_job_id(job.id)
@@ -84,7 +95,12 @@ class RuleScheduleSynchronizer:
                 if unchanged and job is not None:
                     continue
                 if job is None:
-                    _add_rule_job(self.scheduler, rule, self.execute_rule)
+                    _add_rule_job(
+                        self.scheduler,
+                        rule,
+                        self.execute_rule,
+                        misfire_grace_seconds=self.misfire_grace_seconds,
+                    )
                 else:
                     self.scheduler.reschedule_job(
                         _job_id(rule_id),
@@ -99,8 +115,15 @@ class RuleScheduleSynchronizer:
 def build_scheduler(
     rules: Iterable[AlertRule],
     execute_rule: Callable[[int], None],
+    *,
+    misfire_grace_seconds: int = 300,
 ) -> BackgroundScheduler:
     scheduler = BackgroundScheduler(timezone="Asia/Shanghai")
     for rule in valid_scheduled_rules(rules):
-        _add_rule_job(scheduler, rule, execute_rule)
+        _add_rule_job(
+            scheduler,
+            rule,
+            execute_rule,
+            misfire_grace_seconds=misfire_grace_seconds,
+        )
     return scheduler

@@ -4,6 +4,7 @@ from unittest.mock import Mock
 import pytest
 from apscheduler.triggers.cron import CronTrigger
 
+from app import scheduler as scheduler_module
 from app.models import AlertRule, SendMode, utc_now
 from app.scheduler import RuleScheduleSynchronizer, build_scheduler
 
@@ -25,6 +26,26 @@ def make_rule(**overrides):
     return AlertRule(**data)
 
 
+class RecordingScheduler:
+    def __init__(self, **kwargs):
+        self.added_jobs = []
+
+    def add_job(self, *args, **kwargs):
+        self.added_jobs.append((args, kwargs))
+
+    def get_jobs(self):
+        return []
+
+    def get_job(self, job_id):
+        return None
+
+
+def assert_job_options(kwargs, misfire_grace_seconds):
+    assert kwargs["misfire_grace_time"] == misfire_grace_seconds
+    assert kwargs["coalesce"] is True
+    assert kwargs["max_instances"] == 1
+
+
 def test_scheduler_adds_enabled_rule_job():
     scheduler = build_scheduler([make_rule()], execute_rule=lambda rule_id: None)
 
@@ -33,6 +54,49 @@ def test_scheduler_adds_enabled_rule_job():
     assert len(jobs) == 1
     assert jobs[0].id == "rule-7"
     assert list(jobs[0].args) == [7]
+
+
+def test_scheduler_passes_misfire_options_when_building_initial_jobs(monkeypatch):
+    monkeypatch.setattr(scheduler_module, "BackgroundScheduler", RecordingScheduler)
+    scheduler = build_scheduler(
+        [make_rule()],
+        execute_rule=lambda rule_id: None,
+        misfire_grace_seconds=45,
+    )
+
+    assert_job_options(scheduler.added_jobs[0][1], 45)
+
+
+def test_scheduler_uses_default_misfire_options_when_building_initial_jobs(monkeypatch):
+    monkeypatch.setattr(scheduler_module, "BackgroundScheduler", RecordingScheduler)
+    scheduler = build_scheduler([make_rule()], execute_rule=lambda rule_id: None)
+
+    assert_job_options(scheduler.added_jobs[0][1], 300)
+
+
+def test_rule_synchronizer_passes_misfire_options_when_adding_dynamic_job():
+    scheduler = RecordingScheduler()
+    synchronizer = RuleScheduleSynchronizer(
+        scheduler,
+        execute_rule=lambda rule_id: None,
+        misfire_grace_seconds=45,
+    )
+
+    synchronizer.sync([make_rule()])
+
+    assert_job_options(scheduler.added_jobs[0][1], 45)
+
+
+def test_rule_synchronizer_uses_default_misfire_options_when_adding_dynamic_job():
+    scheduler = RecordingScheduler()
+    synchronizer = RuleScheduleSynchronizer(
+        scheduler,
+        execute_rule=lambda rule_id: None,
+    )
+
+    synchronizer.sync([make_rule()])
+
+    assert_job_options(scheduler.added_jobs[0][1], 300)
 
 
 def test_scheduler_skips_disabled_and_unsaved_rules():

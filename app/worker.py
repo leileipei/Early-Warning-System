@@ -69,8 +69,16 @@ def main() -> None:
     init_db()
     settings = get_settings()
     execute_rule = build_execute_rule_callback()
-    scheduler = build_scheduler([], execute_rule)
-    synchronizer = RuleScheduleSynchronizer(scheduler, execute_rule)
+    scheduler = build_scheduler(
+        [],
+        execute_rule,
+        misfire_grace_seconds=settings.scheduler_misfire_grace_seconds,
+    )
+    synchronizer = RuleScheduleSynchronizer(
+        scheduler,
+        execute_rule,
+        misfire_grace_seconds=settings.scheduler_misfire_grace_seconds,
+    )
     run_sync_loop(
         scheduler,
         synchronizer,

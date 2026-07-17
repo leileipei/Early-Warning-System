@@ -1,3 +1,4 @@
+from types import SimpleNamespace
 from unittest.mock import Mock
 
 from sqlmodel import Session
@@ -67,3 +68,40 @@ def test_worker_skips_rule_when_execution_lease_is_busy(caplog):
 
     execute_rule.assert_called_once()
     assert "rule_id=42" in caplog.text
+
+
+def test_worker_main_passes_misfire_grace_seconds_to_scheduler_and_synchronizer(
+    monkeypatch,
+):
+    import app.worker as worker
+
+    scheduler = object()
+    execute_rule = object()
+    settings = SimpleNamespace(
+        scheduler_misfire_grace_seconds=45,
+        scheduler_sync_interval_seconds=10.0,
+    )
+    build_scheduler = Mock(return_value=scheduler)
+    synchronizer = Mock()
+
+    monkeypatch.setattr(worker, "init_db", Mock())
+    monkeypatch.setattr(worker, "get_settings", Mock(return_value=settings))
+    monkeypatch.setattr(worker, "build_execute_rule_callback", Mock(return_value=execute_rule))
+    monkeypatch.setattr(worker, "build_scheduler", build_scheduler)
+    monkeypatch.setattr(worker, "RuleScheduleSynchronizer", Mock(return_value=synchronizer))
+    run_sync_loop = Mock()
+    monkeypatch.setattr(worker, "run_sync_loop", run_sync_loop)
+
+    worker.main()
+
+    build_scheduler.assert_called_once_with(
+        [], execute_rule, misfire_grace_seconds=45
+    )
+    worker.RuleScheduleSynchronizer.assert_called_once_with(
+        scheduler, execute_rule, misfire_grace_seconds=45
+    )
+    run_sync_loop.assert_called_once_with(
+        scheduler,
+        synchronizer,
+        interval_seconds=10.0,
+    )
