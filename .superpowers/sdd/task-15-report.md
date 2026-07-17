@@ -91,8 +91,8 @@ id  enabled  updated_at
 /tmp/ews-task15-py311/bin/pytest --cov=app --cov-report=term-missing --cov-fail-under=93
 ```
 
-2026-07-17 的最终锁环境复验（Python 3.11.15）实际输出：`507 passed in 22.49s`，
-`Total coverage: 94.55%`，满足 `>=93%`。
+2026-07-17 的最终锁环境复验（Python 3.11.15）实际输出：`519 passed in 22.31s`，
+`Total coverage: 94.11%`，满足 `>=93%`。
 
 ```bash
 /tmp/ews-task15-py311/bin/pip check
@@ -149,10 +149,14 @@ git diff --check
 ## 外部门槛完成记录
 
 - GitHub PR：<https://github.com/leileipei/Early-Warning-System/pull/2>（draft，
-  `codex/production-readiness` 到 `main`）。HEAD `77b362d` 的 push/PR 两组 CI，
-  Python 3.11、3.12、3.13 共六个 job 均通过；run IDs 为 `29580393575` 与 `29580395226`。
+  `codex/production-readiness` 到 `main`）。HEAD `aef3fe5` 的 push/PR 两组 CI，
+  Python 3.11、3.12、3.13 共六个 job 均通过；run IDs 为 `29583486029` 与 `29583490199`。
 - 浏览器验收：真实本地 Web 与 Worker 使用测试数据库和 adapter，桌面 `1440x900` 与移动
   `390x844` 验收通过；截图位于 `/tmp/ews-acceptance/`。
-- 独立审查：`182048e..8285d66` 的 3 个 Important 与 1 个 Minor 均由
-  `77b362d fix: surface production readiness failures` 修复；复审 `8285d66..77b362d`
-  为 Critical/Important/Minor 均 0，`Ready to merge=yes`，定点 63 tests 通过。
+- 验收加固：`419d935` 修正嵌套结构脱敏、operations 停机/备份顺序及连续编号、deployment
+  1-22 章节号；干净移动日志截图为
+  `/tmp/ews-acceptance/logs-mobile-390x844-clean.jpg`。`a886984` 支持格式化多行 JSON 和
+  键冒号换行脱敏；`aef3fe5` 对未闭合、65 层深度、32768 扫描窗口歧义统一 fail-closed。
+- 最终独立复审：`a886984..aef3fe5` 的 Critical/Important/Minor 均为 0，`Ready=yes`；
+  定点 `tests/test_error_reporting.py` 为 `22 passed`。此前文档和截图的 2 个 Important、
+  3 个 Minor，以及跨行与 fail-closed 边界均已关闭。
