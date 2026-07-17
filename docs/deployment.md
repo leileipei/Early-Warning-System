@@ -13,7 +13,7 @@
 
 ## 2. 环境要求
 
-- Python 3.11 或更高版本。
+- Python 3.11、3.12 或 3.13。
 - 可访问 SQL Server 的网络环境。
 - 可访问公司 SMTP 邮件服务器的网络环境。
 - Microsoft ODBC Driver for SQL Server。
@@ -38,13 +38,23 @@ git pull
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
-pip install -e ".[dev]"
+pip install -r requirements-dev.lock
+pip install --no-deps -e .
 ```
 
-如果生产环境不需要运行测试，也可以只安装主依赖：
+生产环境不需要测试工具时，安装生产锁文件与当前项目：
 
 ```bash
-pip install -e .
+pip install -r requirements.lock
+pip install --no-deps .
+```
+
+锁文件由 Python 3.11 环境生成，适用于受支持的 Python 3.11-3.13。升级依赖时使用开发环境更新两份锁文件，并一同提交：
+
+```bash
+.venv/bin/python -m pip install -U pip-tools
+.venv/bin/pip-compile --strip-extras --resolver=backtracking --output-file=requirements.lock pyproject.toml
+.venv/bin/pip-compile --extra=dev --strip-extras --resolver=backtracking --output-file=requirements-dev.lock pyproject.toml
 ```
 
 ## 5. 配置环境变量
