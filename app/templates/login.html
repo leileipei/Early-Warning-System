@@ -5,6 +5,9 @@
 <section class="auth-shell">
   <section class="auth-panel panel">
     <h1>管理员登录</h1>
+    {% if error %}
+    <p class="form-error" role="alert">{{ error }}</p>
+    {% endif %}
     <form class="stacked-form" method="post" action="/login">
       {{ csrf_input(csrf_token) }}
       <label>

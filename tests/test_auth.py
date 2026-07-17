@@ -208,11 +208,35 @@ def test_login_with_wrong_password_returns_400(auth_app, auth_engine):
         client,
         "/login",
         data={"username": "admin", "password": "wrong-password"},
+        headers={"accept": "application/json"},
         follow_redirects=False,
     )
 
     assert response.status_code == 400
     assert response.json() == {"detail": "用户名或密码错误"}
+
+
+def test_html_login_with_wrong_password_renders_generic_error(auth_app, auth_engine):
+    _create_admin_user(auth_engine)
+    client = TestClient(auth_app)
+    submitted_username = "<script>untrusted-user</script>"
+    submitted_password = "wrong-password-must-not-be-reflected"
+
+    response = _csrf_post(
+        client,
+        "/login",
+        data={"username": submitted_username, "password": submitted_password},
+        headers={"accept": "text/html"},
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 400
+    assert response.headers["content-type"].startswith("text/html")
+    assert "用户名或密码错误" in response.text
+    assert submitted_username not in response.text
+    assert submitted_password not in response.text
+    assert 'name="username"' in response.text
+    assert 'name="password"' in response.text
 
 
 def test_logout_clears_admin_session(auth_app, auth_engine):
@@ -420,6 +444,35 @@ def test_login_locks_on_fifth_failure(auth_app, auth_engine):
     assert [response.status_code for response in responses] == [400, 400, 400, 400, 429]
     assert responses[-1].headers["retry-after"] == "900"
     assert responses[-1].json() == {"detail": "登录尝试过多，请稍后重试"}
+
+
+def test_html_login_lockout_renders_error_and_preserves_retry_after(auth_app, auth_engine):
+    from app.web_security import LoginRateLimiter
+
+    _create_admin_user(auth_engine)
+    clock = FakeClock()
+    auth_app.state.login_rate_limiter = LoginRateLimiter(
+        max_failures=5,
+        failure_window_seconds=900,
+        lockout_seconds=900,
+        clock=clock,
+    )
+    client = TestClient(auth_app)
+
+    responses = [
+        _csrf_post(
+            client,
+            "/login",
+            data={"username": "admin", "password": "wrong"},
+            headers={"accept": "text/html"},
+        )
+        for _ in range(5)
+    ]
+
+    assert [response.status_code for response in responses] == [400, 400, 400, 400, 429]
+    assert responses[-1].headers["retry-after"] == "900"
+    assert responses[-1].headers["content-type"].startswith("text/html")
+    assert "登录尝试过多，请稍后重试" in responses[-1].text
 
 
 def test_concurrent_logins_for_one_key_stop_verifying_after_lockout(

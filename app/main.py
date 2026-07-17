@@ -4,13 +4,18 @@ from fastapi.responses import PlainTextResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.sessions import SessionMiddleware
 
-from app.auth import router as auth_router
+from app.auth import LOGIN_FAILURE_DETAIL, LOGIN_LIMIT_DETAIL, router as auth_router
 from app.db import get_engine
 from app.health import ReadinessResult, check_readiness
 from app.paths import STATIC_DIR
-from app.routes import router as page_router
+from app.routes import router as page_router, templates
 from app.settings import get_settings
-from app.web_security import SecurityHeadersMiddleware, apply_security_headers, LoginRateLimiter
+from app.web_security import (
+    LoginRateLimiter,
+    SecurityHeadersMiddleware,
+    apply_security_headers,
+    ensure_csrf_token,
+)
 
 
 def create_app() -> FastAPI:
@@ -39,6 +44,32 @@ def create_app() -> FastAPI:
     @app.exception_handler(HTTPException)
     async def handle_http_exception(request: Request, exc: HTTPException):
         accepts_html = "text/html" in request.headers.get("accept", "")
+        if (
+            request.url.path == "/login"
+            and request.method == "POST"
+            and accepts_html
+            and exc.status_code in {
+                status.HTTP_400_BAD_REQUEST,
+                status.HTTP_429_TOO_MANY_REQUESTS,
+            }
+        ):
+            error = (
+                LOGIN_FAILURE_DETAIL
+                if exc.status_code == status.HTTP_400_BAD_REQUEST
+                else LOGIN_LIMIT_DETAIL
+            )
+            return templates.TemplateResponse(
+                request,
+                "login.html",
+                {
+                    "request": request,
+                    "csrf_token": ensure_csrf_token(request),
+                    "title": "登录",
+                    "error": error,
+                },
+                status_code=exc.status_code,
+                headers=dict(exc.headers or {}),
+            )
         if (
             exc.status_code == status.HTTP_401_UNAUTHORIZED
             and request.method == "GET"

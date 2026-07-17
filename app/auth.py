@@ -16,6 +16,7 @@ from app.web_security import (
 )
 
 router = APIRouter(dependencies=[Depends(require_csrf)])
+LOGIN_FAILURE_DETAIL = "用户名或密码错误"
 LOGIN_LIMIT_DETAIL = "登录尝试过多，请稍后重试"
 DUMMY_PASSWORD_HASH = "$2b$12$0kBPCpi0b/V47sHVriEA7.Du9xSBpCUp8Dmb5xq.fDZVF3Fc0ZyKW"
 ADMIN_USER_ID_SESSION_KEY = "admin_user_id"
@@ -139,7 +140,7 @@ def login(
             retry_after = limiter.record_failure(client_id, username)
             if retry_after:
                 _raise_login_limited(retry_after)
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="用户名或密码错误")
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=LOGIN_FAILURE_DETAIL)
 
         limiter.clear(client_id, username)
         request.session.clear()
