@@ -20,6 +20,11 @@ def test_session_secret_requires_at_least_32_bytes():
         Settings(**valid_settings_payload() | {"session_secret": "短" * 10})
 
 
+def test_scheduler_misfire_grace_seconds_rejects_bool():
+    with pytest.raises(ValidationError):
+        Settings(**valid_settings_payload() | {"scheduler_misfire_grace_seconds": True})
+
+
 @pytest.mark.parametrize(
     ("field", "value"),
     [

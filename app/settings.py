@@ -25,6 +25,13 @@ class Settings(BaseSettings):
     login_failure_window_seconds: int = Field(default=900, gt=0)
     login_lockout_seconds: int = Field(default=900, gt=0)
 
+    @field_validator("scheduler_misfire_grace_seconds", mode="before")
+    @classmethod
+    def reject_scheduler_misfire_bool(cls, value: object) -> object:
+        if isinstance(value, bool):
+            raise ValueError("scheduler_misfire_grace_seconds must be an integer")
+        return value
+
     @field_validator("session_secret")
     @classmethod
     def validate_session_secret(cls, value: str, info: ValidationInfo) -> str:
