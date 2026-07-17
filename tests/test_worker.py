@@ -126,6 +126,65 @@ def test_run_sync_loop_records_failed_sync_heartbeat(engine):
     scheduler.start.assert_called_once()
 
 
+def test_run_sync_loop_cleans_logs_on_start_and_at_monotonic_intervals():
+    scheduler = Mock()
+    cleanup_logs = Mock()
+    clock_values = iter([0.0, 4.0, 10.0])
+    sync_calls = 0
+
+    def monotonic_fn():
+        return next(clock_values)
+
+    def sleep_fn(_interval_seconds):
+        nonlocal sync_calls
+        sync_calls += 1
+        if sync_calls == 3:
+            raise KeyboardInterrupt
+
+    worker.run_sync_loop(
+        scheduler,
+        Mock(),
+        interval_seconds=1.0,
+        cleanup_logs=cleanup_logs,
+        cleanup_interval_seconds=10.0,
+        monotonic_fn=monotonic_fn,
+        sync_once=Mock(return_value=worker.RuleSyncResult(ok=True)),
+        sleep_fn=sleep_fn,
+    )
+
+    assert cleanup_logs.call_count == 2
+    scheduler.start.assert_called_once()
+    scheduler.shutdown.assert_called_once()
+
+
+def test_log_cleanup_failure_does_not_stop_rule_sync_or_scheduler(caplog):
+    scheduler = Mock()
+    cleanup_logs = Mock(side_effect=RuntimeError("database unavailable"))
+    synchronizer = Mock()
+    sync_once = Mock(return_value=worker.RuleSyncResult(ok=True))
+
+    def stop_after_initial_sync(_interval_seconds):
+        raise KeyboardInterrupt
+
+    with caplog.at_level("ERROR"):
+        worker.run_sync_loop(
+            scheduler,
+            synchronizer,
+            interval_seconds=10.0,
+            cleanup_logs=cleanup_logs,
+            cleanup_interval_seconds=86400.0,
+            monotonic_fn=lambda: 0.0,
+            sync_once=sync_once,
+            sleep_fn=stop_after_initial_sync,
+        )
+
+    cleanup_logs.assert_called_once()
+    sync_once.assert_called_once_with(synchronizer)
+    scheduler.start.assert_called_once()
+    scheduler.shutdown.assert_called_once()
+    assert "清理过期日志失败" in caplog.text
+
+
 def test_heartbeat_write_failure_does_not_stop_scheduler(caplog):
     scheduler = Mock()
 
@@ -179,6 +238,8 @@ def test_worker_main_passes_misfire_grace_seconds_to_scheduler_and_synchronizer(
     settings = SimpleNamespace(
         scheduler_misfire_grace_seconds=45,
         scheduler_sync_interval_seconds=10.0,
+        log_retention_days=180,
+        log_cleanup_interval_seconds=86400,
     )
     build_scheduler = Mock(return_value=scheduler)
     synchronizer = Mock()
@@ -206,6 +267,8 @@ def test_worker_main_passes_misfire_grace_seconds_to_scheduler_and_synchronizer(
     assert run_sync_loop.call_args.kwargs["interval_seconds"] == 10.0
     assert run_sync_loop.call_args.kwargs["worker_id"] == "worker-a"
     assert callable(run_sync_loop.call_args.kwargs["session_factory"])
+    assert callable(run_sync_loop.call_args.kwargs["cleanup_logs"])
+    assert run_sync_loop.call_args.kwargs["cleanup_interval_seconds"] == 86400
 
     with Session(engine) as session:
         heartbeat = session.get(WorkerHeartbeat, 1)

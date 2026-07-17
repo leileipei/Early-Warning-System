@@ -9,6 +9,7 @@ from sqlmodel import Session, select
 from app.db import get_engine, init_db
 from app.execution_lock import RuleExecutionInProgressError
 from app.execution_service import execute_rule_by_id
+from app.log_service import cleanup_expired_logs
 from app.models import AlertRule, TriggerType
 from app.scheduler import RuleScheduleSynchronizer, build_scheduler
 from app.settings import get_settings
@@ -84,6 +85,13 @@ def _record_start_heartbeat(
         logger.exception("记录 Worker 启动心跳失败")
 
 
+def _cleanup_logs_once(cleanup_logs: Callable[[], object]) -> None:
+    try:
+        cleanup_logs()
+    except Exception:
+        logger.exception("清理过期日志失败")
+
+
 def run_sync_loop(
     scheduler,
     synchronizer,
@@ -93,11 +101,18 @@ def run_sync_loop(
     session_factory: Callable[[], Session] | None = None,
     sync_once=sync_rules_once,
     record_sync: Callable[..., None] = record_worker_sync,
+    cleanup_logs: Callable[[], object] | None = None,
+    cleanup_interval_seconds: float | None = None,
     sleep_fn=time.sleep,
+    monotonic_fn=time.monotonic,
 ) -> None:
     heartbeat_session_factory = session_factory or (lambda: Session(get_engine()))
+    active_cleanup_logs = cleanup_logs or (lambda: None)
+    active_cleanup_interval = cleanup_interval_seconds or float("inf")
     scheduler_started = False
     try:
+        _cleanup_logs_once(active_cleanup_logs)
+        next_cleanup_at = monotonic_fn() + active_cleanup_interval
         result = sync_once(synchronizer)
         if worker_id is not None:
             _record_sync_heartbeat(heartbeat_session_factory, record_sync, worker_id, result)
@@ -105,6 +120,10 @@ def run_sync_loop(
         scheduler_started = True
         while True:
             sleep_fn(interval_seconds)
+            now = monotonic_fn()
+            if now >= next_cleanup_at:
+                _cleanup_logs_once(active_cleanup_logs)
+                next_cleanup_at = now + active_cleanup_interval
             result = sync_once(synchronizer)
             if worker_id is not None:
                 _record_sync_heartbeat(heartbeat_session_factory, record_sync, worker_id, result)
@@ -120,6 +139,12 @@ def main() -> None:
 
     def session_factory() -> Session:
         return Session(get_engine())
+
+    def cleanup_logs() -> int:
+        return cleanup_expired_logs(
+            session_factory,
+            retention_days=settings.log_retention_days,
+        )
 
     _record_start_heartbeat(session_factory, worker_id)
     execute_rule = build_execute_rule_callback()
@@ -139,6 +164,8 @@ def main() -> None:
         interval_seconds=settings.scheduler_sync_interval_seconds,
         worker_id=worker_id,
         session_factory=session_factory,
+        cleanup_logs=cleanup_logs,
+        cleanup_interval_seconds=settings.log_cleanup_interval_seconds,
     )
 
 
