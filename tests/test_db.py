@@ -134,6 +134,45 @@ def test_init_db_is_idempotent_after_worker_heartbeat_exists(engine):
         assert session.exec(select(func.count()).select_from(WorkerHeartbeat)).one() == 1
 
 
+def test_init_db_adds_log_indexes_to_existing_sqlite_database(tmp_path):
+    from app.db import create_db_engine, init_db
+
+    database_path = tmp_path / "legacy-log-indexes.sqlite3"
+    engine = create_db_engine(f"sqlite:///{database_path}")
+    with engine.begin() as connection:
+        connection.execute(
+            text(
+                "CREATE TABLE executionlog ("
+                "id INTEGER PRIMARY KEY, rule_id INTEGER NOT NULL, trigger_type VARCHAR NOT NULL, "
+                "status VARCHAR NOT NULL, started_at DATETIME NOT NULL, finished_at DATETIME, "
+                "row_count INTEGER NOT NULL, email_count INTEGER NOT NULL, duration_ms INTEGER NOT NULL, "
+                "error_type VARCHAR NOT NULL, error_message VARCHAR NOT NULL)"
+            )
+        )
+        connection.execute(
+            text(
+                "CREATE TABLE maillog ("
+                "id INTEGER PRIMARY KEY, execution_log_id INTEGER NOT NULL, recipients VARCHAR NOT NULL, "
+                "cc_recipients VARCHAR NOT NULL, subject VARCHAR NOT NULL, status VARCHAR NOT NULL, "
+                "error_message VARCHAR NOT NULL, sent_at DATETIME NOT NULL)"
+            )
+        )
+
+    init_db(engine)
+    init_db(engine)
+
+    assert {
+        "ix_executionlog_started_at",
+        "ix_executionlog_status",
+        "ix_executionlog_rule_id",
+    } <= {index["name"] for index in inspect(engine).get_indexes("executionlog")}
+    assert {
+        "ix_maillog_sent_at",
+        "ix_maillog_status",
+        "ix_maillog_execution_log_id",
+    } <= {index["name"] for index in inspect(engine).get_indexes("maillog")}
+
+
 def test_init_db_rolls_back_sqlite_upgrade_when_worker_heartbeat_index_creation_fails(tmp_path):
     from app.db import create_db_engine, init_db
 

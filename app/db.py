@@ -10,6 +10,15 @@ from app.settings import get_settings
 _engine: Engine | None = None
 _schema_initialized = False
 
+_LOG_INDEX_STATEMENTS = (
+    "CREATE INDEX IF NOT EXISTS ix_executionlog_started_at ON executionlog (started_at)",
+    "CREATE INDEX IF NOT EXISTS ix_executionlog_status ON executionlog (status)",
+    "CREATE INDEX IF NOT EXISTS ix_executionlog_rule_id ON executionlog (rule_id)",
+    "CREATE INDEX IF NOT EXISTS ix_maillog_sent_at ON maillog (sent_at)",
+    "CREATE INDEX IF NOT EXISTS ix_maillog_status ON maillog (status)",
+    "CREATE INDEX IF NOT EXISTS ix_maillog_execution_log_id ON maillog (execution_log_id)",
+)
+
 
 def create_db_engine(database_url: str | None = None) -> Engine:
     url = database_url or get_settings().database_url
@@ -131,6 +140,10 @@ def _migrate_sqlite_schema(connection: Connection) -> None:
         if missing_columns:
             columns = ", ".join(sorted(missing_columns))
             raise RuntimeError(f"workerheartbeat schema is incomplete: {columns}")
+
+    if {"executionlog", "maillog"} <= table_names:
+        for statement in _LOG_INDEX_STATEMENTS:
+            connection.exec_driver_sql(statement)
 
 
 def get_session() -> Generator[Session, None, None]:

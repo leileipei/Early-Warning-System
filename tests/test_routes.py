@@ -2465,6 +2465,63 @@ def test_logs_page_lists_execution_and_mail_logs(monkeypatch, session):
         get_settings.cache_clear()
 
 
+def test_logs_page_keeps_filters_and_other_log_page_in_pagination_links(monkeypatch, session):
+    data_source = _create_data_source(session)
+    rule = _create_rule(session, data_source)
+    session.add_all(
+        [
+            ExecutionLog(
+                rule_id=rule.id,
+                trigger_type=TriggerType.MANUAL,
+                status=ExecutionStatus.FAILED,
+                error_message=f"execution-problem-{index}",
+            )
+            for index in range(11)
+        ]
+    )
+    session.commit()
+    execution_log = session.exec(select(ExecutionLog)).first()
+    assert execution_log is not None
+    session.add_all(
+        [
+            MailLog(
+                execution_log_id=execution_log.id,
+                recipients="ops@example.com",
+                subject=f"mail-problem-{index}",
+                status=MailStatus.FAILED,
+            )
+            for index in range(31)
+        ]
+    )
+    session.commit()
+    client, get_settings, app = _client_with_admin(monkeypatch, session)
+    try:
+        response = client.get(
+            "/logs?execution_status=failed&trigger_type=manual"
+            f"&rule_id={rule.id}&mail_status=failed&keyword=problem"
+            "&execution_page=1&mail_page=3&page_size=10"
+        )
+
+        assert response.status_code == 200
+        assert "总计 11 条，第 1/2 页" in response.text
+        assert "总计 31 条，第 3/4 页" in response.text
+        assert 'name="page_size" min="10" max="200" value="10"' in response.text
+        assert (
+            f"execution_status=failed&amp;trigger_type=manual&amp;rule_id={rule.id}"
+            "&amp;mail_status=failed&amp;keyword=problem&amp;execution_page=2"
+            "&amp;mail_page=3&amp;page_size=10"
+        ) in response.text
+        assert (
+            f"execution_status=failed&amp;trigger_type=manual&amp;rule_id={rule.id}"
+            "&amp;mail_status=failed&amp;keyword=problem&amp;execution_page=1"
+            "&amp;mail_page=2&amp;page_size=10"
+        ) in response.text
+        assert "mail-problem-" in response.text
+    finally:
+        app.dependency_overrides.clear()
+        get_settings.cache_clear()
+
+
 def test_table_panel_section_headings_align_with_table_content():
     stylesheet = Path("app/static/styles.css").read_text(encoding="utf-8")
 

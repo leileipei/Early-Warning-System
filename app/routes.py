@@ -1,12 +1,12 @@
 import csv
 import json
 from io import StringIO
+from urllib.parse import urlencode
 
 from apscheduler.triggers.cron import CronTrigger
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 from fastapi.templating import Jinja2Templates
-from sqlalchemy import or_
 from sqlmodel import Session, select
 
 from app.auth import require_admin
@@ -15,6 +15,7 @@ from app.dashboard import build_dashboard_context
 from app.execution_lock import RuleExecutionInProgressError
 from app.db import get_session
 from app.execution_service import build_smtp_mailer, build_sql_client, execute_rule_by_id
+from app.log_service import DEFAULT_PAGE_SIZE, LogFilters, list_execution_logs, list_mail_logs
 from app.mailer import EmailMessage
 from app.models import (
     AdminUser,
@@ -1487,48 +1488,39 @@ def logs_page(
     admin: AdminUser = Depends(require_admin),
     session: Session = Depends(get_session),
 ):
-    filters = {
-        "execution_status": request.query_params.get("execution_status", "").strip(),
-        "trigger_type": request.query_params.get("trigger_type", "").strip(),
-        "rule_id": request.query_params.get("rule_id", "").strip(),
-        "mail_status": request.query_params.get("mail_status", "").strip(),
-        "keyword": request.query_params.get("keyword", "").strip(),
-    }
+    filters = LogFilters(
+        execution_status=request.query_params.get("execution_status", "").strip(),
+        trigger_type=request.query_params.get("trigger_type", "").strip(),
+        rule_id=request.query_params.get("rule_id", "").strip(),
+        mail_status=request.query_params.get("mail_status", "").strip(),
+        keyword=request.query_params.get("keyword", "").strip(),
+    )
+    execution_page = list_execution_logs(
+        session,
+        filters,
+        page=_log_page_parameter(request, "execution_page", 1),
+        page_size=_log_page_parameter(request, "page_size", DEFAULT_PAGE_SIZE),
+    )
+    mail_page = list_mail_logs(
+        session,
+        filters,
+        page=_log_page_parameter(request, "mail_page", 1),
+        page_size=execution_page.page_size,
+    )
 
-    execution_query = select(ExecutionLog)
-    if filters["execution_status"] in {status.value for status in ExecutionStatus}:
-        execution_query = execution_query.where(ExecutionLog.status == filters["execution_status"])
-    if filters["trigger_type"] in {trigger.value for trigger in TriggerType}:
-        execution_query = execution_query.where(ExecutionLog.trigger_type == filters["trigger_type"])
-    if filters["rule_id"]:
-        try:
-            execution_query = execution_query.where(ExecutionLog.rule_id == int(filters["rule_id"]))
-        except ValueError:
-            execution_query = execution_query.where(ExecutionLog.rule_id == -1)
-    if filters["keyword"]:
-        keyword = filters["keyword"]
-        execution_query = execution_query.where(
-            or_(
-                ExecutionLog.error_type.contains(keyword),
-                ExecutionLog.error_message.contains(keyword),
-            )
+    def log_page_url(execution_page_number: int, mail_page_number: int) -> str:
+        return "/logs?" + urlencode(
+            {
+                "execution_status": filters.execution_status,
+                "trigger_type": filters.trigger_type,
+                "rule_id": filters.rule_id,
+                "mail_status": filters.mail_status,
+                "keyword": filters.keyword,
+                "execution_page": execution_page_number,
+                "mail_page": mail_page_number,
+                "page_size": execution_page.page_size,
+            }
         )
-    execution_logs = session.exec(execution_query.order_by(ExecutionLog.started_at.desc())).all()
-
-    mail_query = select(MailLog)
-    if filters["mail_status"] in {status.value for status in MailStatus}:
-        mail_query = mail_query.where(MailLog.status == filters["mail_status"])
-    if filters["keyword"]:
-        keyword = filters["keyword"]
-        mail_query = mail_query.where(
-            or_(
-                MailLog.recipients.contains(keyword),
-                MailLog.cc_recipients.contains(keyword),
-                MailLog.subject.contains(keyword),
-                MailLog.error_message.contains(keyword),
-            )
-        )
-    mail_logs = session.exec(mail_query.order_by(MailLog.sent_at.desc())).all()
 
     return _template_response(
         request,
@@ -1540,10 +1532,18 @@ def logs_page(
             "execution_statuses": list(ExecutionStatus),
             "trigger_types": list(TriggerType),
             "mail_statuses": list(MailStatus),
-            "execution_logs": execution_logs,
-            "mail_logs": mail_logs,
+            "execution_page": execution_page,
+            "mail_page": mail_page,
+            "log_page_url": log_page_url,
         },
     )
+
+
+def _log_page_parameter(request: Request, name: str, default: int) -> int:
+    try:
+        return int(request.query_params.get(name, default))
+    except (TypeError, ValueError):
+        return default
 
 
 @router.get("/logs/executions.csv")

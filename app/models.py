@@ -132,10 +132,10 @@ class AlertRuleVersion(SQLModel, table=True):
 
 class ExecutionLog(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
-    rule_id: int = Field(foreign_key="alertrule.id")
+    rule_id: int = Field(foreign_key="alertrule.id", index=True)
     trigger_type: TriggerType
-    status: ExecutionStatus = ExecutionStatus.RUNNING
-    started_at: datetime = Field(default_factory=utc_now)
+    status: ExecutionStatus = Field(default=ExecutionStatus.RUNNING, index=True)
+    started_at: datetime = Field(default_factory=utc_now, index=True)
     finished_at: Optional[datetime] = None
     row_count: int = 0
     email_count: int = 0
@@ -146,10 +146,10 @@ class ExecutionLog(SQLModel, table=True):
 
 class MailLog(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
-    execution_log_id: int = Field(foreign_key="executionlog.id")
+    execution_log_id: int = Field(foreign_key="executionlog.id", index=True)
     recipients: str
     cc_recipients: str = ""
     subject: str
-    status: MailStatus
+    status: MailStatus = Field(index=True)
     error_message: str = ""
-    sent_at: datetime = Field(default_factory=utc_now)
+    sent_at: datetime = Field(default_factory=utc_now, index=True)

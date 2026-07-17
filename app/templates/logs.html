@@ -50,6 +50,10 @@
       <span>关键词</span>
       <input type="search" name="keyword" value="{{ filters.keyword }}" placeholder="错误、收件人、主题">
     </label>
+    <label>
+      <span>每页条数</span>
+      <input type="number" name="page_size" min="10" max="200" value="{{ execution_page.page_size }}">
+    </label>
     <div class="filter-actions">
       <button type="submit">筛选</button>
       <a class="button button-secondary" href="/logs">重置</a>
@@ -73,7 +77,7 @@
         </tr>
       </thead>
       <tbody>
-        {% for log in execution_logs %}
+        {% for log in execution_page.items %}
         <tr>
           <td>{{ log.started_at }}</td>
           <td>{{ log.rule_id }}</td>
@@ -90,6 +94,17 @@
         {% endfor %}
       </tbody>
     </table>
+  </div>
+  <div class="log-pagination">
+    <p>总计 {{ execution_page.total }} 条，第 {{ execution_page.page }}/{{ execution_page.total_pages }} 页</p>
+    <div class="pagination-actions">
+      {% if execution_page.has_previous %}
+      <a class="button button-secondary" href="{{ log_page_url(execution_page.page - 1, mail_page.page) }}">上一页</a>
+      {% endif %}
+      {% if execution_page.has_next %}
+      <a class="button button-secondary" href="{{ log_page_url(execution_page.page + 1, mail_page.page) }}">下一页</a>
+      {% endif %}
+    </div>
   </div>
 </section>
 
@@ -108,7 +123,7 @@
         </tr>
       </thead>
       <tbody>
-        {% for log in mail_logs %}
+        {% for log in mail_page.items %}
         <tr>
           <td>{{ log.sent_at }}</td>
           <td>{{ log.execution_log_id }}</td>
@@ -124,6 +139,17 @@
         {% endfor %}
       </tbody>
     </table>
+  </div>
+  <div class="log-pagination">
+    <p>总计 {{ mail_page.total }} 条，第 {{ mail_page.page }}/{{ mail_page.total_pages }} 页</p>
+    <div class="pagination-actions">
+      {% if mail_page.has_previous %}
+      <a class="button button-secondary" href="{{ log_page_url(execution_page.page, mail_page.page - 1) }}">上一页</a>
+      {% endif %}
+      {% if mail_page.has_next %}
+      <a class="button button-secondary" href="{{ log_page_url(execution_page.page, mail_page.page + 1) }}">下一页</a>
+      {% endif %}
+    </div>
   </div>
 </section>
 {% endblock %}
