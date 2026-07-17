@@ -3095,3 +3095,279 @@ def test_static_stylesheet_is_mounted_from_other_cwd(tmp_path, monkeypatch):
         assert "text/css" in response.headers["content-type"]
     finally:
         get_settings.cache_clear()
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "message"),
+    [
+        ("query_timeout_seconds", "0", "查询超时必须在 1 至 600 之间"),
+        ("max_rows", "5001", "最大行数必须在 1 至 5000 之间"),
+    ],
+)
+def test_rule_forms_reject_out_of_range_query_limits(monkeypatch, session, field, value, message):
+    data_source = _create_data_source(session)
+    rule = _create_rule(session, data_source)
+    client, get_settings, app = _client_with_admin(monkeypatch, session)
+    try:
+        create_form = _valid_rule_form(data_source.id)
+        create_form[field] = value
+        create_response = client.post("/rules", data=create_form)
+        update_form = _valid_rule_form(data_source.id)
+        update_form[field] = value
+        update_response = client.post(f"/rules/{rule.id}", data=update_form)
+
+        assert create_response.status_code == 400
+        assert update_response.status_code == 400
+        assert message in create_response.text
+        assert message in update_response.text
+        assert session.exec(select(AlertRuleVersion)).all() == []
+    finally:
+        app.dependency_overrides.clear()
+        get_settings.cache_clear()
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "message"),
+    [
+        ("query_timeout_seconds", 601, "查询超时时间必须在 1 至 600 之间"),
+        ("max_rows", 5001, "最大返回行数必须在 1 至 5000 之间"),
+    ],
+)
+def test_import_rejects_out_of_range_query_limits(monkeypatch, session, field, value, message):
+    data_source = _create_data_source(session)
+    rule_data = {
+        "name": "导入规则",
+        "data_source_name": data_source.name,
+        "sql_text": "select id from imported_orders",
+        "cron_expression": "15 8 * * 1-5",
+        "recipients": "ops@example.com",
+        "subject_template": "导入预警",
+        "body_template": "{{table}}",
+        "query_timeout_seconds": 30,
+        "max_rows": 500,
+    }
+    rule_data[field] = value
+    client, get_settings, app = _client_with_admin(monkeypatch, session)
+    try:
+        response = client.post(
+            "/rules/import",
+            files={"file": ("rules.json", json.dumps({"version": 1, "rules": [rule_data]}), "application/json")},
+        )
+
+        assert response.status_code == 400
+        assert message in response.text
+        assert session.exec(select(AlertRule)).all() == []
+    finally:
+        app.dependency_overrides.clear()
+        get_settings.cache_clear()
+
+
+def test_import_rejects_oversized_rule_count_and_file(monkeypatch, session):
+    data_source = _create_data_source(session)
+    rule_data = {
+        "name": "导入规则",
+        "data_source_name": data_source.name,
+        "sql_text": "select id from imported_orders",
+        "cron_expression": "15 8 * * 1-5",
+        "recipients": "ops@example.com",
+        "subject_template": "导入预警",
+        "body_template": "{{table}}",
+    }
+    client, get_settings, app = _client_with_admin(monkeypatch, session)
+    try:
+        too_many_response = client.post(
+            "/rules/import",
+            files={
+                "file": (
+                    "rules.json",
+                    json.dumps({"version": 1, "rules": [rule_data] * 501}),
+                    "application/json",
+                )
+            },
+        )
+        too_large_response = client.post(
+            "/rules/import",
+            files={"file": ("oversized.json", b" " * 1_048_577, "application/json")},
+        )
+
+        assert too_many_response.status_code == 400
+        assert "导入规则数量不能超过 500 条" in too_many_response.text
+        assert too_large_response.status_code == 400
+        assert "导入文件不能超过 1 MiB" in too_large_response.text
+    finally:
+        app.dependency_overrides.clear()
+        get_settings.cache_clear()
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "message"),
+    [
+        ("port", "0", "端口必须在 1 至 65535 之间"),
+        ("connect_timeout_seconds", "601", "连接超时必须在 1 至 600 之间"),
+    ],
+)
+def test_sql_server_forms_reject_out_of_range_values_without_echoing_password(
+    monkeypatch, session, field, value, message
+):
+    data_source = _create_data_source(session)
+    form_data = {
+        "name": data_source.name,
+        "host": data_source.host,
+        "port": "1433",
+        "database": data_source.database,
+        "username": data_source.username,
+        "password": "never-render-this-password",
+        "connect_timeout_seconds": "10",
+    }
+    form_data[field] = value
+    client, get_settings, app = _client_with_admin(monkeypatch, session)
+    try:
+        create_response = client.post("/settings/sql-server", data={**form_data, "name": "新生产库"})
+        update_response = client.post(f"/settings/sql-server/{data_source.id}", data=form_data)
+
+        assert create_response.status_code == 400
+        assert update_response.status_code == 400
+        assert message in create_response.text
+        assert message in update_response.text
+        assert "never-render-this-password" not in create_response.text
+        assert "never-render-this-password" not in update_response.text
+    finally:
+        app.dependency_overrides.clear()
+        get_settings.cache_clear()
+
+
+def test_new_sql_server_defaults_to_certificate_validation_and_existing_yes_warns(monkeypatch, session):
+    data_source = _create_data_source(session)
+    data_source.trust_server_certificate = "yes"
+    session.add(data_source)
+    session.commit()
+    client, get_settings, app = _client_with_admin(monkeypatch, session)
+    try:
+        settings_response = client.get("/settings")
+        edit_response = client.get(f"/settings/sql-server/{data_source.id}/edit")
+
+        assert SqlDataSource.model_fields["encrypt"].default == "yes"
+        assert SqlDataSource.model_fields["trust_server_certificate"].default == "no"
+        assert (
+            '<select name="encrypt">\n'
+            '              <option value="yes" selected>yes</option>'
+        ) in settings_response.text
+        assert (
+            '<select name="trust_server_certificate">\n'
+            '              <option value="yes">yes</option>\n'
+            '              <option value="no" selected>no</option>'
+        ) in settings_response.text
+        assert "证书校验风险" in settings_response.text
+        assert '<option value="yes" selected>yes</option>' in edit_response.text
+        assert "证书校验风险" in edit_response.text
+        session.refresh(data_source)
+        assert data_source.trust_server_certificate == "yes"
+    finally:
+        app.dependency_overrides.clear()
+        get_settings.cache_clear()
+
+
+@pytest.mark.parametrize(
+    ("kind", "field", "value", "message"),
+    [
+        ("sql", "port", 0, "端口必须在 1 至 65535 之间"),
+        ("sql", "connect_timeout_seconds", 601, "连接超时必须在 1 至 600 之间"),
+        ("smtp", "port", 0, "端口必须在 1 至 65535 之间"),
+        ("smtp", "timeout_seconds", 601, "SMTP 超时必须在 1 至 600 之间"),
+    ],
+)
+def test_connection_tests_reject_invalid_saved_values(monkeypatch, session, kind, field, value, message):
+    routes = importlib.import_module("app.routes")
+    client, get_settings, app = _client_with_admin(monkeypatch, session)
+    try:
+        if kind == "sql":
+            config = _create_data_source(session)
+            path = f"/settings/sql-server/{config.id}/test"
+            factory_name = "build_sql_client"
+        else:
+            config = _create_smtp_config(session)
+            path = f"/settings/smtp/{config.id}/test"
+            factory_name = "build_smtp_mailer"
+        setattr(config, field, value)
+        session.add(config)
+        session.commit()
+        factory = Mock()
+        monkeypatch.setattr(routes, factory_name, factory)
+
+        response = client.post(path)
+
+        assert response.status_code == 400
+        assert message in response.text
+        factory.assert_not_called()
+    finally:
+        app.dependency_overrides.clear()
+        get_settings.cache_clear()
+
+
+def test_sql_validation_and_preview_reject_invalid_saved_connection_timeout(monkeypatch, session):
+    data_source = _create_data_source(session)
+    data_source.connect_timeout_seconds = 601
+    session.add(data_source)
+    session.commit()
+    routes = importlib.import_module("app.routes")
+    build_client = Mock()
+    monkeypatch.setattr(routes, "build_sql_client", build_client)
+    client, get_settings, app = _client_with_admin(monkeypatch, session)
+    try:
+        validate_response = client.post(
+            "/rules/validate-sql",
+            data={"data_source_id": str(data_source.id), "sql_text": "select 1"},
+        )
+        preview_response = client.post(
+            "/rules/preview-sql",
+            data={
+                "data_source_id": str(data_source.id),
+                "sql_text": "select 1",
+                "query_timeout_seconds": "601",
+            },
+        )
+
+        assert validate_response.status_code == 400
+        assert validate_response.json()["message"] == "连接超时必须在 1 至 600 之间"
+        assert preview_response.status_code == 400
+        assert preview_response.json()["message"] == "查询超时必须在 1 至 600 之间"
+        build_client.assert_not_called()
+    finally:
+        app.dependency_overrides.clear()
+        get_settings.cache_clear()
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "message"),
+    [
+        ("port", "0", "端口必须在 1 至 65535 之间"),
+        ("timeout_seconds", "601", "SMTP 超时必须在 1 至 600 之间"),
+    ],
+)
+def test_smtp_forms_reject_out_of_range_values_without_echoing_password(
+    monkeypatch, session, field, value, message
+):
+    smtp_config = _create_smtp_config(session)
+    form_data = {
+        "host": smtp_config.host,
+        "port": "587",
+        "username": smtp_config.username,
+        "password": "never-render-this-password",
+        "sender": smtp_config.sender,
+        "timeout_seconds": "10",
+    }
+    form_data[field] = value
+    client, get_settings, app = _client_with_admin(monkeypatch, session)
+    try:
+        create_response = client.post("/settings/smtp", data=form_data)
+        update_response = client.post(f"/settings/smtp/{smtp_config.id}", data=form_data)
+
+        assert create_response.status_code == 400
+        assert update_response.status_code == 400
+        assert message in create_response.text
+        assert message in update_response.text
+        assert "never-render-this-password" not in create_response.text
+        assert "never-render-this-password" not in update_response.text
+    finally:
+        app.dependency_overrides.clear()
+        get_settings.cache_clear()

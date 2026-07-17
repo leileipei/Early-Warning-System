@@ -36,7 +36,7 @@ def test_pyodbc_sql_server_client_builds_connection_string():
     assert "UID={warning_user};" in client.connection_string
     assert "PWD={secret};" in client.connection_string
     assert "Encrypt=yes;" in client.connection_string
-    assert "TrustServerCertificate=yes;" in client.connection_string
+    assert "TrustServerCertificate=no;" in client.connection_string
     assert "Connection Timeout=5;" in client.connection_string
 
 

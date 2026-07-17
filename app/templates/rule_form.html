@@ -96,11 +96,11 @@
         </label>
         <label>
           <span>查询超时（秒）</span>
-          <input name="query_timeout_seconds" type="number" value="{{ form.get('query_timeout_seconds', '30') }}" min="1">
+          <input name="query_timeout_seconds" type="number" value="{{ form.get('query_timeout_seconds', '30') }}" min="1" max="600">
         </label>
         <label>
           <span>最大行数</span>
-          <input name="max_rows" type="number" value="{{ form.get('max_rows', '500') }}" min="1">
+          <input name="max_rows" type="number" value="{{ form.get('max_rows', '500') }}" min="1" max="5000">
         </label>
       </div>
     </section>

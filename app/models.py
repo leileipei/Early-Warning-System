@@ -52,7 +52,7 @@ class SqlDataSource(SQLModel, table=True):
     odbc_driver: str = "ODBC Driver 18 for SQL Server"
     server_override: str = ""
     encrypt: str = "yes"
-    trust_server_certificate: str = "yes"
+    trust_server_certificate: str = "no"
     extra_params: str = ""
     created_at: datetime = Field(default_factory=utc_now)
     updated_at: datetime = Field(default_factory=utc_now)

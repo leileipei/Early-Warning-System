@@ -27,7 +27,7 @@
       </label>
       <label>
         <span>端口</span>
-        <input name="port" type="number" value="{{ form.get('port', '1433') }}" required>
+        <input name="port" type="number" value="{{ form.get('port', '1433') }}" min="1" max="65535" required>
       </label>
       <label>
         <span>数据库</span>
@@ -47,7 +47,7 @@
     <section class="form-section">
       <label>
         <span>连接超时（秒）</span>
-        <input name="connect_timeout_seconds" type="number" value="{{ form.get('connect_timeout_seconds', '10') }}" min="1">
+        <input name="connect_timeout_seconds" type="number" value="{{ form.get('connect_timeout_seconds', '10') }}" min="1" max="600">
       </label>
       <label>
         <span>ODBC 驱动</span>
@@ -69,11 +69,14 @@
         <label>
           <span>TrustServerCertificate</span>
           <select name="trust_server_certificate">
-            <option value="yes" {% if form.get('trust_server_certificate', 'yes') == 'yes' %}selected{% endif %}>yes</option>
-            <option value="no" {% if form.get('trust_server_certificate') == 'no' %}selected{% endif %}>no</option>
+            <option value="yes" {% if form.get('trust_server_certificate') == 'yes' %}selected{% endif %}>yes</option>
+            <option value="no" {% if form.get('trust_server_certificate', 'no') == 'no' %}selected{% endif %}>no</option>
           </select>
         </label>
       </div>
+      {% if form.get('trust_server_certificate') == 'yes' %}
+      <p class="security-warning">证书校验风险：TrustServerCertificate=yes 会跳过 SQL Server 证书验证。</p>
+      {% endif %}
       <label>
         <span>额外连接参数</span>
         <input name="extra_params" value="{{ form.get('extra_params', '') }}" placeholder="例如 ApplicationIntent=ReadOnly;MultiSubnetFailover=Yes;">

@@ -32,7 +32,7 @@
         </label>
         <label>
           <span>端口</span>
-          <input name="port" type="number" value="1433" required>
+          <input name="port" type="number" value="1433" min="1" max="65535" required>
         </label>
         <label>
           <span>数据库</span>
@@ -52,7 +52,7 @@
       <section class="form-section">
         <label>
           <span>连接超时（秒）</span>
-          <input name="connect_timeout_seconds" type="number" value="10" min="1">
+          <input name="connect_timeout_seconds" type="number" value="10" min="1" max="600">
         </label>
         <label>
           <span>ODBC 驱动</span>
@@ -74,8 +74,8 @@
           <label>
             <span>TrustServerCertificate</span>
             <select name="trust_server_certificate">
-              <option value="yes" selected>yes</option>
-              <option value="no">no</option>
+              <option value="yes">yes</option>
+              <option value="no" selected>no</option>
             </select>
           </label>
         </div>
@@ -109,7 +109,12 @@
             <td>{{ data_source.name }}</td>
             <td>{{ data_source.host }}:{{ data_source.port }}</td>
             <td>{{ data_source.database }}</td>
-            <td><span class="status-text {% if data_source.enabled %}status-success{% else %}status-muted{% endif %}">{{ "启用" if data_source.enabled else "停用" }}</span></td>
+            <td>
+              <span class="status-text {% if data_source.enabled %}status-success{% else %}status-muted{% endif %}">{{ "启用" if data_source.enabled else "停用" }}</span>
+              {% if data_source.trust_server_certificate == "yes" %}
+              <span class="security-warning">证书校验风险</span>
+              {% endif %}
+            </td>
             <td>
               <div class="table-actions">
                 <form class="inline-form" method="post" action="/settings/sql-server/{{ data_source.id }}/test">
@@ -144,7 +149,7 @@
         </label>
         <label>
           <span>端口</span>
-          <input name="port" type="number" value="587" required>
+          <input name="port" type="number" value="587" min="1" max="65535" required>
         </label>
       </section>
       <section class="form-section">
@@ -162,7 +167,7 @@
         </label>
         <label>
           <span>超时（秒）</span>
-          <input name="timeout_seconds" type="number" value="10" min="1">
+          <input name="timeout_seconds" type="number" value="10" min="1" max="600">
         </label>
       </section>
       <section class="form-section">

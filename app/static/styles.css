@@ -227,6 +227,12 @@ button:focus-visible {
   color: var(--success);
 }
 
+.security-warning {
+  color: var(--warning);
+  font-size: 13px;
+  font-weight: 600;
+}
+
 label {
   display: grid;
   gap: 6px;

@@ -23,7 +23,7 @@
       </label>
       <label>
         <span>端口</span>
-        <input name="port" type="number" value="{{ form.get('port', '587') }}" min="1" required>
+        <input name="port" type="number" value="{{ form.get('port', '587') }}" min="1" max="65535" required>
       </label>
     </section>
     <section class="form-section">
@@ -41,7 +41,7 @@
       </label>
       <label>
         <span>超时（秒）</span>
-        <input name="timeout_seconds" type="number" value="{{ form.get('timeout_seconds', '10') }}" min="1">
+        <input name="timeout_seconds" type="number" value="{{ form.get('timeout_seconds', '10') }}" min="1" max="600">
       </label>
     </section>
     <section class="form-section">

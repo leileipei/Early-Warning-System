@@ -76,6 +76,34 @@ def _is_checked(value: str | None) -> bool:
     return value in {"on", "true", "1"}
 
 
+MAX_RULE_IMPORT_BYTES = 1_048_576
+MAX_IMPORTED_RULES = 500
+
+
+def _validate_bounded_int(value: int, *, label: str, minimum: int, maximum: int) -> str | None:
+    if not minimum <= value <= maximum:
+        return f"{label}必须在 {minimum} 至 {maximum} 之间"
+    return None
+
+
+def _validate_sql_connection_values(port: int, connect_timeout_seconds: int) -> str | None:
+    return _validate_bounded_int(port, label="端口", minimum=1, maximum=65535) or _validate_bounded_int(
+        connect_timeout_seconds,
+        label="连接超时",
+        minimum=1,
+        maximum=600,
+    )
+
+
+def _validate_smtp_values(port: int, timeout_seconds: int) -> str | None:
+    return _validate_bounded_int(port, label="端口", minimum=1, maximum=65535) or _validate_bounded_int(
+        timeout_seconds,
+        label="SMTP 超时",
+        minimum=1,
+        maximum=600,
+    )
+
+
 def _get_active_rule_or_404(session: Session, rule_id: int) -> AlertRule:
     rule = session.get(AlertRule, rule_id)
     if rule is None or rule.archived_at is not None:
@@ -282,6 +310,25 @@ def _positive_import_int(rule_data: dict, field: str, index: int, label: str, de
     return parsed
 
 
+def _bounded_import_int(
+    rule_data: dict,
+    field: str,
+    index: int,
+    label: str,
+    default: int,
+    maximum: int,
+) -> int:
+    value = rule_data.get(field, default)
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"第 {index} 条规则{label}必须是整数") from exc
+    error = _validate_bounded_int(parsed, label=label, minimum=1, maximum=maximum)
+    if error is not None:
+        raise ValueError(f"第 {index} 条规则{error}")
+    return parsed
+
+
 def _build_imported_rules(payload: dict, session: Session) -> list[AlertRule]:
     if not isinstance(payload, dict) or payload.get("version") != 1:
         raise ValueError("导入文件格式无效：仅支持 version 1")
@@ -289,6 +336,8 @@ def _build_imported_rules(payload: dict, session: Session) -> list[AlertRule]:
     rules_data = payload.get("rules")
     if not isinstance(rules_data, list):
         raise ValueError("导入文件格式无效：rules 必须是列表")
+    if len(rules_data) > MAX_IMPORTED_RULES:
+        raise ValueError(f"导入规则数量不能超过 {MAX_IMPORTED_RULES} 条")
 
     sources_by_name = {source.name: source for source in session.exec(select(SqlDataSource)).all()}
     imported_rules = []
@@ -337,14 +386,22 @@ def _build_imported_rules(payload: dict, session: Session) -> list[AlertRule]:
                 subject_template=_optional_import_text(rule_data, "subject_template"),
                 body_template=_optional_import_text(rule_data, "body_template"),
                 send_mode=send_mode,
-                query_timeout_seconds=_positive_import_int(
+                query_timeout_seconds=_bounded_import_int(
                     rule_data,
                     "query_timeout_seconds",
                     index,
                     "查询超时时间",
                     30,
+                    600,
                 ),
-                max_rows=_positive_import_int(rule_data, "max_rows", index, "最大返回行数", 500),
+                max_rows=_bounded_import_int(
+                    rule_data,
+                    "max_rows",
+                    index,
+                    "最大返回行数",
+                    500,
+                    5000,
+                ),
                 enabled=bool(rule_data.get("enabled", True)),
                 notes=_optional_import_text(rule_data, "notes"),
                 dynamic_recipient_field=dynamic_recipient_field,
@@ -414,6 +471,33 @@ def _validate_rule_form(
     action: str,
     heading: str,
 ):
+    error = _validate_bounded_int(
+        int(form["query_timeout_seconds"]),
+        label="查询超时",
+        minimum=1,
+        maximum=600,
+    ) or _validate_bounded_int(
+        int(form["max_rows"]),
+        label="最大行数",
+        minimum=1,
+        maximum=5000,
+    )
+    if error is not None:
+        return None, None, _template_response(
+            request,
+            "rule_form.html",
+            _rule_form_context(
+                request,
+                admin,
+                session,
+                error=error,
+                form=form,
+                action=action,
+                heading=heading,
+            ),
+            status_code=400,
+        )
+
     try:
         validate_select_only_sql(form["sql_text"])
         parsed_send_mode = SendMode(form["send_mode"])
@@ -633,7 +717,7 @@ def _submitted_data_source_form(
         "port": str(port),
         "database": database,
         "username": username,
-        "password": password,
+        "password": "",
         "enabled": "on" if _is_checked(enabled) else "",
         "connect_timeout_seconds": str(connect_timeout_seconds),
         "odbc_driver": odbc_driver,
@@ -699,7 +783,10 @@ async def import_rules_json(
     session: Session = Depends(get_session),
 ):
     try:
-        payload = json.loads((await file.read()).decode("utf-8"))
+        content = await file.read(MAX_RULE_IMPORT_BYTES + 1)
+        if len(content) > MAX_RULE_IMPORT_BYTES:
+            raise ValueError("导入文件不能超过 1 MiB")
+        payload = json.loads(content.decode("utf-8"))
         imported_rules = _build_imported_rules(payload, session)
     except (UnicodeDecodeError, json.JSONDecodeError):
         return _template_response(
@@ -848,6 +935,12 @@ def validate_rule_sql(
             {"valid": False, "message": "请选择有效的数据源"},
             status_code=400,
         )
+    error = _validate_sql_connection_values(
+        data_source.port,
+        data_source.connect_timeout_seconds,
+    )
+    if error is not None:
+        return JSONResponse({"valid": False, "message": error}, status_code=400)
 
     try:
         build_sql_client(data_source).validate_syntax(
@@ -872,6 +965,14 @@ def preview_rule_sql(
     session: Session = Depends(get_session),
 ):
     _ = admin
+    error = _validate_bounded_int(
+        query_timeout_seconds,
+        label="查询超时",
+        minimum=1,
+        maximum=600,
+    )
+    if error is not None:
+        return JSONResponse({"success": False, "message": error}, status_code=400)
     if not data_source_id:
         return JSONResponse(
             {"success": False, "message": "请先选择数据源"},
@@ -900,6 +1001,12 @@ def preview_rule_sql(
             {"success": False, "message": "请选择有效的数据源"},
             status_code=400,
         )
+    error = _validate_sql_connection_values(
+        data_source.port,
+        data_source.connect_timeout_seconds,
+    )
+    if error is not None:
+        return JSONResponse({"success": False, "message": error}, status_code=400)
 
     try:
         preview = build_sql_client(data_source).query(
@@ -1143,12 +1250,20 @@ def create_sql_server_settings(
     odbc_driver: str = Form("ODBC Driver 18 for SQL Server"),
     server_override: str = Form(""),
     encrypt: str = Form("yes"),
-    trust_server_certificate: str = Form("yes"),
+    trust_server_certificate: str = Form("no"),
     extra_params: str = Form(""),
     admin: AdminUser = Depends(require_admin),
     session: Session = Depends(get_session),
 ):
     _ = admin
+    error = _validate_sql_connection_values(port, connect_timeout_seconds)
+    if error is not None:
+        return _template_response(
+            request,
+            "settings.html",
+            _settings_context(request, admin, session, error=error),
+            status_code=400,
+        )
     existing = session.exec(select(SqlDataSource).where(SqlDataSource.name == name)).first()
     if existing is not None:
         return _template_response(
@@ -1211,6 +1326,14 @@ def test_sql_server_settings(
     data_source = session.get(SqlDataSource, source_id)
     if data_source is None:
         raise HTTPException(status_code=404, detail="数据源不存在")
+    error = _validate_sql_connection_values(data_source.port, data_source.connect_timeout_seconds)
+    if error is not None:
+        return _template_response(
+            request,
+            "settings.html",
+            _settings_context(request, admin, session, error=error),
+            status_code=400,
+        )
 
     try:
         build_sql_client(data_source).query(
@@ -1283,7 +1406,7 @@ def update_sql_server_settings(
     odbc_driver: str = Form("ODBC Driver 18 for SQL Server"),
     server_override: str = Form(""),
     encrypt: str = Form("yes"),
-    trust_server_certificate: str = Form("yes"),
+    trust_server_certificate: str | None = Form(None),
     extra_params: str = Form(""),
     admin: AdminUser = Depends(require_admin),
     session: Session = Depends(get_session),
@@ -1291,6 +1414,8 @@ def update_sql_server_settings(
     data_source = session.get(SqlDataSource, source_id)
     if data_source is None:
         raise HTTPException(status_code=404, detail="数据源不存在")
+    if trust_server_certificate is None:
+        trust_server_certificate = data_source.trust_server_certificate
 
     form = _submitted_data_source_form(
         name,
@@ -1307,6 +1432,20 @@ def update_sql_server_settings(
         trust_server_certificate,
         extra_params,
     )
+    error = _validate_sql_connection_values(port, connect_timeout_seconds)
+    if error is not None:
+        return _template_response(
+            request,
+            "sql_server_form.html",
+            {
+                "admin": admin,
+                "title": "编辑数据源",
+                "form": form,
+                "action": f"/settings/sql-server/{source_id}",
+                "error": error,
+            },
+            status_code=400,
+        )
     existing = session.exec(select(SqlDataSource).where(SqlDataSource.name == name)).first()
     if existing is not None and existing.id != data_source.id:
         return _template_response(
@@ -1344,6 +1483,7 @@ def update_sql_server_settings(
 
 @router.post("/settings/smtp")
 def create_smtp_settings(
+    request: Request,
     host: str = Form(""),
     port: int = Form(587),
     username: str = Form(""),
@@ -1357,6 +1497,14 @@ def create_smtp_settings(
     session: Session = Depends(get_session),
 ):
     _ = admin
+    error = _validate_smtp_values(port, timeout_seconds)
+    if error is not None:
+        return _template_response(
+            request,
+            "settings.html",
+            _settings_context(request, admin, session, error=error),
+            status_code=400,
+        )
     smtp_config = SmtpConfig(
         host=host,
         port=port,
@@ -1399,6 +1547,7 @@ def edit_smtp_settings_page(
 @router.post("/settings/smtp/{config_id}")
 def update_smtp_settings(
     config_id: int,
+    request: Request,
     host: str = Form(""),
     port: int = Form(587),
     username: str = Form(""),
@@ -1415,6 +1564,30 @@ def update_smtp_settings(
     smtp_config = session.get(SmtpConfig, config_id)
     if smtp_config is None:
         raise HTTPException(status_code=404, detail="SMTP 配置不存在")
+    error = _validate_smtp_values(port, timeout_seconds)
+    if error is not None:
+        return _template_response(
+            request,
+            "smtp_form.html",
+            {
+                "admin": admin,
+                "title": "编辑 SMTP 配置",
+                "form": {
+                    "host": host,
+                    "port": str(port),
+                    "username": username,
+                    "password": "",
+                    "sender": sender,
+                    "use_tls": "on" if _is_checked(use_tls) else "",
+                    "use_ssl": "on" if _is_checked(use_ssl) else "",
+                    "enabled": "on" if _is_checked(enabled) else "",
+                    "timeout_seconds": str(timeout_seconds),
+                },
+                "action": f"/settings/smtp/{config_id}",
+                "error": error,
+            },
+            status_code=400,
+        )
 
     smtp_config.host = host
     smtp_config.port = port
@@ -1458,6 +1631,14 @@ def test_smtp_settings(
     smtp_config = session.get(SmtpConfig, config_id)
     if smtp_config is None:
         raise HTTPException(status_code=404, detail="SMTP 配置不存在")
+    error = _validate_smtp_values(smtp_config.port, smtp_config.timeout_seconds)
+    if error is not None:
+        return _template_response(
+            request,
+            "settings.html",
+            _settings_context(request, admin, session, error=error),
+            status_code=400,
+        )
 
     message = EmailMessage(
         recipients=[smtp_config.sender],
