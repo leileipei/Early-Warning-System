@@ -202,11 +202,11 @@ def test_redact_sensitive_text_fails_closed_for_unterminated_multiline_structure
 
     assert "multiline-open-secret" not in rendered
     assert "multiline-tail-secret" not in rendered
-    assert '"safe": "keep-after-multiline-unclosed"' in rendered
+    assert '"safe": "keep-after-multiline-unclosed"' not in rendered
 
 
 @pytest.mark.parametrize(
-    ("value", "secrets", "preserved"),
+    ("value", "secrets", "discarded"),
     [
         (
             '{"password": {"nested": ["open-secret", {"deep": "tail-secret"}]\n'
@@ -223,13 +223,13 @@ def test_redact_sensitive_text_fails_closed_for_unterminated_multiline_structure
     ],
 )
 def test_redact_sensitive_text_fails_closed_for_unterminated_nested_values(
-    value, secrets, preserved
+    value, secrets, discarded
 ):
     rendered = redact_sensitive_text(value)
 
     for secret in secrets:
         assert secret not in rendered
-    assert preserved in rendered
+    assert discarded not in rendered
 
 
 @pytest.mark.parametrize(
@@ -237,16 +237,57 @@ def test_redact_sensitive_text_fails_closed_for_unterminated_nested_values(
     [
         ('{"PASSWORD" : "mixed-case-secret", "safe": 1}', "mixed-case-secret", '"safe": 1'),
         ("{'password': 'single-quoted-secret', 'safe': 2}", "single-quoted-secret", "'safe': 2"),
-        ('{"password": "unterminated-secret\n"safe": "keep"', "unterminated-secret", '"safe": "keep"'),
     ],
 )
-def test_redact_sensitive_text_fails_closed_for_structured_sensitive_values(
+def test_redact_sensitive_text_preserves_sibling_after_complete_scalar_values(
     value, secret, preserved
 ):
     rendered = redact_sensitive_text(value)
 
     assert secret not in rendered
     assert preserved in rendered
+
+
+def test_redact_sensitive_text_discards_tail_after_unterminated_scalar_value():
+    rendered = redact_sensitive_text(
+        '{"password": "unterminated-secret\n"safe": "discard-after-unterminated"'
+    )
+
+    assert "unterminated-secret" not in rendered
+    assert "discard-after-unterminated" not in rendered
+
+
+def test_redact_sensitive_text_fails_closed_for_flat_unterminated_structure():
+    rendered = redact_sensitive_text(
+        '{"password": {\n'
+        '"value": "flat-open-secret",\n'
+        '"items": ["flat-list-secret"]'
+    )
+
+    assert "flat-open-secret" not in rendered
+    assert "flat-list-secret" not in rendered
+
+
+def test_redact_sensitive_text_fails_closed_when_depth_limit_is_exceeded():
+    rendered = redact_sensitive_text(
+        '{"password": '
+        + "[" * 65
+        + '\n"value": "depth-limit-secret"'
+        + "]" * 65
+        + ', "safe": "discard-after-depth-limit"}'
+    )
+
+    assert "depth-limit-secret" not in rendered
+    assert "discard-after-depth-limit" not in rendered
+
+
+def test_redact_sensitive_text_fails_closed_when_colon_is_outside_scan_window():
+    rendered = redact_sensitive_text(
+        '"password"' + " " * 32_769 + ': "wide-secret"',
+        limit=40_000,
+    )
+
+    assert "wide-secret" not in rendered
 
 
 def test_log_exception_safely_keeps_a_bounded_redacted_traceback(caplog):

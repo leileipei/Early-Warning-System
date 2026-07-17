@@ -35,18 +35,14 @@ ODBC_CONNECTION_STRING = re.compile(r"(?i)\bDRIVER=\{[^\r\n]*")
 _STRUCTURED_VALUE_SCAN_LIMIT = 32_768
 _STRUCTURED_VALUE_DEPTH_LIMIT = 64
 _MAPPING_WHITESPACE = " \t\r\n"
-_MAPPING_ENTRY_LINE = re.compile(
-    r"(?m)^(?P<indent>[ \t]*)(?:"
-    r'"(?:\\.|[^"\\\r\n])+"|'
-    r"'(?:\\.|[^'\\\r\n])+'|"
-    r"[A-Za-z_][A-Za-z0-9_-]*)[ \t]*:"
-)
 
 
 def _mapping_value_start(text: str, key_end: int, scan_end: int) -> int | None:
     position = key_end
     while position < scan_end and text[position] in _MAPPING_WHITESPACE:
         position += 1
+    if position < scan_end and text[position] == "=":
+        return -1
     if position >= scan_end or text[position] != ":":
         return None
 
@@ -56,29 +52,23 @@ def _mapping_value_start(text: str, key_end: int, scan_end: int) -> int | None:
     return position
 
 
-def _mapping_key_indent(text: str, key_start: int) -> int:
-    line_start = max(text.rfind("\n", 0, key_start), text.rfind("\r", 0, key_start)) + 1
-    position = line_start
-    while position < key_start and text[position] in " \t":
-        position += 1
-    return len(text[line_start:position].expandtabs(4))
-
-
-def _unterminated_value_end(text: str, start: int, scan_end: int, key_indent: int) -> int:
-    for match in _MAPPING_ENTRY_LINE.finditer(text, start, scan_end):
-        if match.start() > start and len(match.group("indent").expandtabs(4)) <= key_indent:
-            return match.start()
+def _consume_trailing_fragment(text: str, start: int, end: int) -> int:
+    position = start
+    while position < end:
+        if text[position] in ",}]":
+            return position
+        if text[position] in _MAPPING_WHITESPACE:
+            position += 1
+            continue
+        while position < end and text[position] not in ",}]\r\n":
+            position += 1
+        if position < end and text[position] in ",}]":
+            return position
+        return len(text)
     return len(text)
 
 
-def _consume_trailing_fragment(text: str, start: int, end: int) -> int:
-    position = start
-    while position < end and text[position] not in ",}]\r\n":
-        position += 1
-    return position
-
-
-def _structured_value_end(text: str, start: int, scan_end: int, key_indent: int) -> int:
+def _structured_value_end(text: str, start: int, scan_end: int) -> int:
     if start >= scan_end:
         return len(text)
 
@@ -93,7 +83,7 @@ def _structured_value_end(text: str, start: int, scan_end: int, key_indent: int)
             character = text[position]
             if quote:
                 if character in "\r\n":
-                    return _unterminated_value_end(text, start, scan_end, key_indent)
+                    return len(text)
                 if escaped:
                     escaped = False
                 elif character == "\\":
@@ -104,16 +94,16 @@ def _structured_value_end(text: str, start: int, scan_end: int, key_indent: int)
                 quote = character
             elif character in closing_for:
                 if len(stack) >= _STRUCTURED_VALUE_DEPTH_LIMIT:
-                    return _unterminated_value_end(text, start, scan_end, key_indent)
+                    return len(text)
                 stack.append(closing_for[character])
             elif character in "]}":
                 if character != stack[-1]:
-                    return _unterminated_value_end(text, start, scan_end, key_indent)
+                    return len(text)
                 stack.pop()
                 if not stack:
                     return _consume_trailing_fragment(text, position + 1, scan_end)
             position += 1
-        return _unterminated_value_end(text, start, scan_end, key_indent)
+        return len(text)
 
     if first in "'\"":
         quote = first
@@ -122,7 +112,7 @@ def _structured_value_end(text: str, start: int, scan_end: int, key_indent: int)
         while position < scan_end:
             character = text[position]
             if character in "\r\n":
-                return _unterminated_value_end(text, start, scan_end, key_indent)
+                return len(text)
             if escaped:
                 escaped = False
             elif character == "\\":
@@ -130,14 +120,14 @@ def _structured_value_end(text: str, start: int, scan_end: int, key_indent: int)
             elif character == quote:
                 return _consume_trailing_fragment(text, position + 1, scan_end)
             position += 1
-        return _unterminated_value_end(text, start, scan_end, key_indent)
+        return len(text)
 
     position = start
     while position < scan_end and text[position] not in ",}]":
         position += 1
     if position < scan_end:
         return position
-    return _unterminated_value_end(text, start, scan_end, key_indent)
+    return len(text)
 
 
 def _redact_sensitive_mapping_values(text: str) -> str:
@@ -147,15 +137,15 @@ def _redact_sensitive_mapping_values(text: str) -> str:
     while match := SENSITIVE_MAPPING_KEY.search(text, search_position):
         scan_end = min(len(text), match.start() + _STRUCTURED_VALUE_SCAN_LIMIT)
         value_start = _mapping_value_start(text, match.end(), scan_end)
-        if value_start is None:
+        if value_start == -1:
             search_position = match.end()
             continue
-        value_end = _structured_value_end(
-            text,
-            value_start,
-            scan_end,
-            _mapping_key_indent(text, match.start()),
-        )
+        if value_start is None:
+            rendered.append(text[cursor : match.end()])
+            rendered.append("[REDACTED]")
+            cursor = len(text)
+            break
+        value_end = _structured_value_end(text, value_start, scan_end)
         rendered.append(text[cursor:value_start])
         rendered.append("[REDACTED]")
         cursor = max(value_end, value_start)
