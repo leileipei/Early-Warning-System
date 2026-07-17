@@ -73,6 +73,12 @@ DATABASE_URL=sqlite:///./early_warning.sqlite3
 SESSION_SECRET=REPLACE_ME_WITH_RANDOM_SESSION_SECRET
 SECRET_KEY=REPLACE_ME_WITH_32_BYTE_URL_SAFE_FERNET_KEY
 SCHEDULER_SYNC_INTERVAL_SECONDS=10
+SCHEDULER_MISFIRE_GRACE_SECONDS=300
+WORKER_HEARTBEAT_TIMEOUT_SECONDS=60
+LOG_RETENTION_DAYS=180
+LOG_CLEANUP_INTERVAL_SECONDS=86400
+SESSION_MAX_AGE_SECONDS=28800
+SESSION_IDLE_TIMEOUT_SECONDS=1800
 SESSION_COOKIE_SECURE=false
 LOGIN_MAX_FAILURES=5
 LOGIN_FAILURE_WINDOW_SECONDS=900
@@ -82,6 +88,22 @@ LOGIN_LOCKOUT_SECONDS=900
 ### SCHEDULER_SYNC_INTERVAL_SECONDS
 
 该值必须大于零，默认值为 10 秒，用于控制运行中的 Worker 多快反映规则变化。
+
+### 调度、心跳、日志与 Session 参数
+
+以下参数都必须大于 0。修改后需要重启表中列出的进程，使新配置生效。
+
+| 参数 | 默认值与单位 | 用途 | 修改后重启 |
+| --- | --- | --- | --- |
+| `SCHEDULER_MISFIRE_GRACE_SECONDS` | 300 秒 | 允许延迟调度任务补执行的时间窗口 | Worker |
+| `WORKER_HEARTBEAT_TIMEOUT_SECONDS` | 60 秒 | Worker 心跳超过该时间后，Web 就绪检查返回不可用 | Web |
+| `LOG_RETENTION_DAYS` | 180 天 | 执行日志和邮件日志的保留天数 | Worker |
+| `LOG_CLEANUP_INTERVAL_SECONDS` | 86400 秒 | Worker 执行日志清理的间隔 | Worker |
+| `SESSION_MAX_AGE_SECONDS` | 28800 秒 | 登录 Session 的绝对最长有效期 | Web |
+| `SESSION_IDLE_TIMEOUT_SECONDS` | 1800 秒 | 登录 Session 的最大空闲时间 | Web |
+
+`SCHEDULER_SYNC_INTERVAL_SECONDS` 修改后也需要重启 Worker。若一次修改同时涉及
+Web 与 Worker 使用的参数，应同时重启两个进程。
 
 ### SESSION_SECRET
 

@@ -20,6 +20,47 @@ def test_session_secret_requires_at_least_32_bytes():
         Settings(**valid_settings_payload() | {"session_secret": "短" * 10})
 
 
+@pytest.mark.parametrize(
+    "session_secret",
+    [
+        " REPLACE_ME_WITH_RANDOM_SESSION_SECRET",
+        "REPLACE_ME_WITH_RANDOM_SESSION_SECRET\t",
+        " replace_me_with_random_session_secret ",
+    ],
+)
+def test_session_secret_rejects_placeholder_with_whitespace_or_mixed_case(
+    session_secret,
+):
+    with pytest.raises(ValidationError) as exc_info:
+        Settings(**valid_settings_payload() | {"session_secret": session_secret})
+
+    assert any(error["loc"] == ("session_secret",) for error in exc_info.value.errors())
+
+
+def test_session_secret_accepts_ordinary_long_random_value():
+    session_secret = "ordinary-random-session-secret-0123456789"
+
+    settings = Settings(
+        **valid_settings_payload() | {"session_secret": session_secret}
+    )
+
+    assert settings.session_secret == session_secret
+
+
+@pytest.mark.parametrize(
+    "session_secret",
+    [
+        " ordinary-random-session-secret-0123456789",
+        "ordinary-random-session-secret-0123456789 ",
+    ],
+)
+def test_session_secret_rejects_outer_whitespace(session_secret):
+    with pytest.raises(ValidationError) as exc_info:
+        Settings(**valid_settings_payload() | {"session_secret": session_secret})
+
+    assert any(error["loc"] == ("session_secret",) for error in exc_info.value.errors())
+
+
 def test_scheduler_misfire_grace_seconds_rejects_bool():
     with pytest.raises(ValidationError):
         Settings(**valid_settings_payload() | {"scheduler_misfire_grace_seconds": True})

@@ -7,6 +7,12 @@ from apscheduler.triggers.cron import CronTrigger
 from app.error_reporting import log_exception_safely
 from app.models import AlertRule
 
+RULE_SCHEDULE_SYNC_FAILURE = "规则调度同步未完全成功"
+
+
+class RuleScheduleSyncError(RuntimeError):
+    pass
+
 
 def valid_scheduled_rules(rules: Iterable[AlertRule]) -> list[AlertRule]:
     valid_rules = []
@@ -78,12 +84,14 @@ class RuleScheduleSynchronizer:
 
     def sync(self, rules: Iterable[AlertRule]) -> None:
         desired = {rule.id: rule for rule in valid_scheduled_rules(rules)}
+        failed_operations = 0
 
         for rule_id in set(self.known_cron_by_rule_id) - set(desired):
             try:
                 if self.scheduler.get_job(_job_id(rule_id)) is not None:
                     self.scheduler.remove_job(_job_id(rule_id))
             except Exception as exc:
+                failed_operations += 1
                 log_exception_safely(
                     self.logger,
                     f"移除规则调度任务失败: rule_id={rule_id}; operation=remove_rule_schedule",
@@ -112,6 +120,7 @@ class RuleScheduleSynchronizer:
                         trigger=CronTrigger.from_crontab(rule.cron_expression),
                     )
             except Exception as exc:
+                failed_operations += 1
                 log_exception_safely(
                     self.logger,
                     f"同步规则调度任务失败: rule_id={rule_id}; operation=sync_rule_schedule",
@@ -119,6 +128,9 @@ class RuleScheduleSynchronizer:
                 )
             else:
                 self.known_cron_by_rule_id[rule_id] = cron_signature
+
+        if failed_operations:
+            raise RuleScheduleSyncError(RULE_SCHEDULE_SYNC_FAILURE)
 
 
 def build_scheduler(

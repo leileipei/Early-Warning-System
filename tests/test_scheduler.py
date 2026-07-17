@@ -116,7 +116,8 @@ def test_rule_synchronizer_logs_redacted_failures_with_rule_id(caplog, operation
     synchronizer = RuleScheduleSynchronizer(scheduler, execute_rule=lambda rule_id: None)
 
     with caplog.at_level("ERROR"):
-        synchronizer.sync(rules)
+        with pytest.raises(RuntimeError, match="规则调度同步未完全成功"):
+            synchronizer.sync(rules)
 
     assert "rule_id=7" in caplog.text
     assert "error_type=RuntimeError" in caplog.text
@@ -251,7 +252,8 @@ def test_rule_synchronizer_preserves_existing_job_when_cron_replacement_fails(st
     synchronizer = RuleScheduleSynchronizer(scheduler, execute_rule=execute_rule)
 
     try:
-        synchronizer.sync([make_rule(id=7, cron_expression="30 10 * * *")])
+        with pytest.raises(RuntimeError, match="规则调度同步未完全成功"):
+            synchronizer.sync([make_rule(id=7, cron_expression="30 10 * * *")])
 
         retained_job = scheduler.get_job("rule-7")
         assert retained_job is not None
@@ -339,12 +341,36 @@ def test_rule_synchronizer_retries_failed_rule_without_blocking_other_rules():
     scheduler.add_job = flaky_add_job
     synchronizer = RuleScheduleSynchronizer(scheduler, execute_rule=lambda rule_id: None)
 
-    synchronizer.sync([make_rule(id=1), make_rule(id=2)])
+    with pytest.raises(RuntimeError, match="规则调度同步未完全成功"):
+        synchronizer.sync([make_rule(id=1), make_rule(id=2)])
     assert scheduler.get_job("rule-1") is None
     assert scheduler.get_job("rule-2") is not None
 
     synchronizer.sync([make_rule(id=1), make_rule(id=2)])
     assert scheduler.get_job("rule-1") is not None
+
+
+def test_rule_synchronizer_reports_remove_failure_after_removing_other_rules():
+    scheduler = build_scheduler(
+        [make_rule(id=1), make_rule(id=2)], execute_rule=lambda rule_id: None
+    )
+    synchronizer = RuleScheduleSynchronizer(
+        scheduler, execute_rule=lambda rule_id: None
+    )
+    real_remove_job = scheduler.remove_job
+
+    def fail_first_rule_remove(job_id):
+        if job_id == "rule-1":
+            raise RuntimeError("scheduler unavailable")
+        return real_remove_job(job_id)
+
+    scheduler.remove_job = fail_first_rule_remove
+
+    with pytest.raises(RuntimeError, match="规则调度同步未完全成功"):
+        synchronizer.sync([])
+
+    assert scheduler.get_job("rule-1") is not None
+    assert scheduler.get_job("rule-2") is None
 
 
 def test_rule_synchronizer_isolates_get_job_failure_and_retries_rule():
@@ -368,7 +394,8 @@ def test_rule_synchronizer_isolates_get_job_failure_and_retries_rule():
 
     scheduler.get_job = flaky_get_job
 
-    synchronizer.sync([make_rule(id=1), make_rule(id=2)])
+    with pytest.raises(RuntimeError, match="规则调度同步未完全成功"):
+        synchronizer.sync([make_rule(id=1), make_rule(id=2)])
     assert real_get_job("rule-2") is not None
 
     synchronizer.sync([make_rule(id=1), make_rule(id=2)])

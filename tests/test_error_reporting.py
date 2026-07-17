@@ -1,5 +1,7 @@
 import logging
 
+import pytest
+
 from app.error_reporting import log_exception_safely, redact_sensitive_text
 
 
@@ -85,6 +87,36 @@ def test_redact_sensitive_text_fails_closed_when_closed_values_have_trailing_fra
 
     for secret in ("alpha", "beta", "gamma", "QUOTEDTAIL", "UIDCLOSEDTAIL", "SERVERCLOSEDTAIL"):
         assert secret not in rendered
+
+
+def test_redact_sensitive_text_handles_json_and_python_dict_values():
+    rendered = redact_sensitive_text(
+        '{"password": "smtp-secret", "safe": "keep-json", '
+        '"nested": {"secret_key" : "nested-secret"}} '
+        "{'session_secret': 'session-secret', 'safe': 'keep-dict'}"
+    )
+
+    for secret in ("smtp-secret", "nested-secret", "session-secret"):
+        assert secret not in rendered
+    assert "keep-json" in rendered
+    assert "keep-dict" in rendered
+
+
+@pytest.mark.parametrize(
+    ("value", "secret", "preserved"),
+    [
+        ('{"PASSWORD" : "mixed-case-secret", "safe": 1}', "mixed-case-secret", '"safe": 1'),
+        ("{'password': 'single-quoted-secret', 'safe': 2}", "single-quoted-secret", "'safe': 2"),
+        ('{"password": "unterminated-secret\n"safe": "keep"', "unterminated-secret", '"safe": "keep"'),
+    ],
+)
+def test_redact_sensitive_text_fails_closed_for_structured_sensitive_values(
+    value, secret, preserved
+):
+    rendered = redact_sensitive_text(value)
+
+    assert secret not in rendered
+    assert preserved in rendered
 
 
 def test_log_exception_safely_keeps_a_bounded_redacted_traceback(caplog):

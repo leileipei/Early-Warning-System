@@ -35,9 +35,12 @@ class Settings(BaseSettings):
     @field_validator("session_secret")
     @classmethod
     def validate_session_secret(cls, value: str, info: ValidationInfo) -> str:
-        if not value.strip():
+        normalized = value.strip()
+        if not normalized:
             raise ValueError(f"{info.field_name} must not be empty")
-        if value.startswith("REPLACE_ME"):
+        if normalized != value:
+            raise ValueError(f"{info.field_name} must not have outer whitespace")
+        if normalized.casefold().startswith("replace_me"):
             raise ValueError(f"{info.field_name} must not use a REPLACE_ME placeholder")
         if len(value.encode("utf-8")) < 32:
             raise ValueError("session_secret must be at least 32 bytes")
