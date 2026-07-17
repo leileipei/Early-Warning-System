@@ -20,6 +20,28 @@ def test_redact_sensitive_text_removes_complete_odbc_string_and_fernet_key():
         assert secret not in rendered
 
 
+def test_redact_sensitive_text_handles_quoted_prefixed_values_and_multiline_odbc():
+    rendered = redact_sensitive_text(
+        'SMTP_PASSWORD="alpha beta gamma"\n'
+        "APP_SMTP_PASSWORD=delta-epsilon\n"
+        "DRIVER={ODBC Driver 18 for SQL Server};\n"
+        "SERVER=warning-db.internal,1433;\n"
+        "UID=warning_user;\n"
+        "DATABASE=warning_database;\n"
+        "PWD='database password';"
+    )
+
+    for secret in (
+        "alpha beta gamma",
+        "delta-epsilon",
+        "warning-db.internal",
+        "warning_user",
+        "warning_database",
+        "database password",
+    ):
+        assert secret not in rendered
+
+
 def test_log_exception_safely_keeps_a_bounded_redacted_traceback(caplog):
     logger = logging.getLogger("tests.error_reporting")
     fernet_key = "b" * 43 + "="

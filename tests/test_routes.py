@@ -1429,6 +1429,7 @@ def test_validate_rule_sql_returns_fixed_redacted_sql_server_syntax_error(monkey
         assert "d" * 43 + "=" not in response.text
         assert "database-password" not in caplog.text
         assert "d" * 43 + "=" not in caplog.text
+        assert f"source_id={data_source.id}" in caplog.text
     finally:
         app.dependency_overrides.clear()
         get_settings.cache_clear()
@@ -2320,6 +2321,42 @@ def test_test_smtp_settings_reports_failure(monkeypatch, session):
         assert response.status_code == 400
         assert "SMTP 测试发送失败，请检查服务器、端口、加密方式和账号配置" in response.text
         assert "smtp-secret" not in response.text
+    finally:
+        app.dependency_overrides.clear()
+        get_settings.cache_clear()
+
+
+@pytest.mark.parametrize("failure_stage", ["builder", "send"])
+def test_smtp_settings_test_redacts_builder_and_send_failures(
+    monkeypatch, session, caplog, failure_stage
+):
+    smtp_config = _create_smtp_config(session)
+    routes = importlib.import_module("app.routes")
+    if failure_stage == "builder":
+        def build_smtp_mailer(_config):
+            raise RuntimeError("SMTP_PASSWORD=smtp-builder-secret")
+    else:
+        class FailingMailer:
+            def send(self, _message):
+                raise RuntimeError("SMTP_PASSWORD=smtp-send-secret")
+
+        def build_smtp_mailer(_config):
+            return FailingMailer()
+
+    monkeypatch.setattr(routes, "build_smtp_mailer", build_smtp_mailer)
+    client, get_settings, app = _client_with_admin(monkeypatch, session)
+    try:
+        with caplog.at_level("ERROR"):
+            response = client.post(f"/settings/smtp/{smtp_config.id}/test")
+
+        assert response.status_code == 400
+        assert "SMTP 测试发送失败，请检查服务器、端口、加密方式和账号配置" in response.text
+        assert "smtp-builder-secret" not in response.text
+        assert "smtp-send-secret" not in response.text
+        assert f"smtp_config_id={smtp_config.id}" in caplog.text
+        assert "error_type=RuntimeError" in caplog.text
+        assert "smtp-builder-secret" not in caplog.text
+        assert "smtp-send-secret" not in caplog.text
     finally:
         app.dependency_overrides.clear()
         get_settings.cache_clear()

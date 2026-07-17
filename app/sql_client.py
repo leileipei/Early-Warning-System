@@ -101,7 +101,7 @@ class PyodbcSqlServerClient:
                 cursor.execute(executable_sql)
                 return rows_from_cursor_limited(cursor, max_rows)
         except Exception as exc:
-            log_exception_safely(logger, "SQL Server query failed", exc)
+            log_exception_safely(logger, "SQL Server query failed: operation=sql_query", exc)
             raise
 
     def validate_syntax(self, sql: str, timeout_seconds: int) -> None:
@@ -120,5 +120,9 @@ class PyodbcSqlServerClient:
                 cursor = connection.cursor()
                 cursor.execute(parse_only_batch)
         except Exception as exc:
-            log_exception_safely(logger, "SQL Server syntax validation failed", exc)
+            log_exception_safely(
+                logger,
+                "SQL Server syntax validation failed: operation=validate_sql_syntax",
+                exc,
+            )
             raise

@@ -99,6 +99,30 @@ def test_rule_synchronizer_uses_default_misfire_options_when_adding_dynamic_job(
     assert_job_options(scheduler.added_jobs[0][1], 300)
 
 
+@pytest.mark.parametrize("operation", ["remove", "sync"])
+def test_rule_synchronizer_logs_redacted_failures_with_rule_id(caplog, operation):
+    scheduler = Mock()
+    if operation == "remove":
+        scheduler.get_jobs.return_value = [Mock(id="rule-7", trigger="cron")]
+        scheduler.get_job.return_value = Mock()
+        scheduler.remove_job.side_effect = RuntimeError("SMTP_PASSWORD=scheduler-secret")
+        rules = []
+    else:
+        scheduler.get_jobs.return_value = []
+        scheduler.get_job.return_value = None
+        scheduler.add_job.side_effect = RuntimeError("SMTP_PASSWORD=scheduler-secret")
+        rules = [make_rule(id=7)]
+
+    synchronizer = RuleScheduleSynchronizer(scheduler, execute_rule=lambda rule_id: None)
+
+    with caplog.at_level("ERROR"):
+        synchronizer.sync(rules)
+
+    assert "rule_id=7" in caplog.text
+    assert "error_type=RuntimeError" in caplog.text
+    assert "scheduler-secret" not in caplog.text
+
+
 def test_scheduler_skips_disabled_and_unsaved_rules():
     scheduler = build_scheduler(
         [
@@ -349,7 +373,7 @@ def test_rule_synchronizer_isolates_get_job_failure_and_retries_rule():
 
     synchronizer.sync([make_rule(id=1), make_rule(id=2)])
     assert attempts["rule-1"] == 2
-    logger.exception.assert_called_once_with("同步规则调度任务失败: rule_id=%s", 1)
+    logger.error.assert_called_once()
 
 
 def test_worker_import_does_not_block():

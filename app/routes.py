@@ -1052,7 +1052,11 @@ def validate_rule_sql(
             timeout_seconds=data_source.connect_timeout_seconds,
         )
     except Exception as exc:
-        log_exception_safely(logger, "SQL Server syntax validation request failed", exc)
+        log_exception_safely(
+            logger,
+            f"SQL Server syntax validation request failed: source_id={data_source.id}; operation=validate_sql",
+            exc,
+        )
         return JSONResponse(
             {"valid": False, "message": public_error_summary(exc, fallback=SQL_SYNTAX_FAILURE)},
             status_code=400,
@@ -1120,7 +1124,11 @@ def preview_rule_sql(
             max_rows=5,
         )
     except Exception as exc:
-        log_exception_safely(logger, "SQL preview request failed", exc)
+        log_exception_safely(
+            logger,
+            f"SQL preview request failed: source_id={data_source.id}; operation=preview_sql",
+            exc,
+        )
         return JSONResponse(
             {"success": False, "message": public_error_summary(exc, fallback=SQL_PREVIEW_FAILURE)},
             status_code=400,
@@ -1463,7 +1471,11 @@ def test_sql_server_settings(
             max_rows=1,
         )
     except Exception as exc:
-        log_exception_safely(logger, "SQL Server connection test failed", exc)
+        log_exception_safely(
+            logger,
+            f"SQL Server connection test failed: source_id={data_source.id}; operation=test_connection",
+            exc,
+        )
         return _template_response(
             request, "settings.html", _settings_context(request, admin, session, error=SQL_CONNECTION_FAILURE),
             status_code=400,
@@ -1796,9 +1808,25 @@ def test_smtp_settings(
         subject="SQL 预警系统 SMTP 测试",
         html_body="<p>SMTP 配置已可用。</p>",
     )
-    result = build_smtp_mailer(smtp_config).send(message)
+    try:
+        result = build_smtp_mailer(smtp_config).send(message)
+    except Exception as exc:
+        log_exception_safely(
+            logger,
+            f"SMTP test failed: smtp_config_id={smtp_config.id}; operation=smtp_test_send",
+            exc,
+        )
+        return _template_response(
+            request,
+            "settings.html",
+            _settings_context(request, admin, session, error=SMTP_TEST_FAILURE),
+            status_code=400,
+        )
     if not result.success:
-        logger.error("SMTP test send failed: error_type=MailSendError")
+        logger.error(
+            "SMTP test send failed: smtp_config_id=%s; operation=smtp_test_send; error_type=MailSendError",
+            smtp_config.id,
+        )
         return _template_response(
             request,
             "settings.html",

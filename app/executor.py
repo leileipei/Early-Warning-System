@@ -79,7 +79,7 @@ class RuleExecutor:
                 max_rows=_rule_max_rows(rule, self.max_rows),
             )
         except Exception as exc:
-            log_exception_safely(logger, "Rule SQL query failed", exc)
+            log_exception_safely(logger, "Rule SQL query failed: operation=rule_sql_query", exc)
             return ExecutionResult(
                 status=ExecutionStatus.FAILED,
                 error_type=type(exc).__name__,
@@ -157,11 +157,21 @@ class RuleExecutor:
         try:
             result = self.mailer.send(message)
         except Exception as exc:
-            log_exception_safely(logger, "Rule email send failed", exc)
-            result = MailSendResult(
-                success=False,
-                error_message=public_error_summary(exc, fallback=SMTP_SEND_FAILURE),
+            log_exception_safely(logger, "Rule email send failed: operation=rule_email_send", exc)
+            return ExecutionMailResult(
+                message=message,
+                result=MailSendResult(
+                    success=False,
+                    error_message=public_error_summary(exc, fallback=SMTP_SEND_FAILURE),
+                ),
             )
+        if not result.success:
+            log_exception_safely(
+                logger,
+                "Rule email returned failure: operation=rule_email_send",
+                RuntimeError(result.error_message or "SMTP send returned failure"),
+            )
+            result = MailSendResult(success=False, error_message=SMTP_SEND_FAILURE)
         return ExecutionMailResult(message=message, result=result)
 
     def _status_for_mail_results(self, mail_results: list[ExecutionMailResult]) -> ExecutionStatus:

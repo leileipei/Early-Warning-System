@@ -508,7 +508,7 @@ def test_all_mail_failures_fail():
     assert result.row_count == 2
     assert result.mail_count == 0
     assert result.error_type == "MailSendError"
-    assert result.error_message == "one or more emails failed"
+    assert result.error_message == "SMTP 发送失败，请检查服务器、端口、加密方式和账号配置"
     assert len(result.mail_results) == 2
     assert all(not mail_result.result.success for mail_result in result.mail_results)
 
@@ -526,7 +526,7 @@ def test_partial_mail_failures_are_partial_failed():
     assert result.row_count == 2
     assert result.mail_count == 1
     assert result.error_type == "MailSendError"
-    assert result.error_message == "one or more emails failed"
+    assert result.error_message == "SMTP 发送失败，请检查服务器、端口、加密方式和账号配置"
     assert [mail_result.result.success for mail_result in result.mail_results] == [True, False]
 
 
@@ -544,6 +544,26 @@ def test_mailer_exception_is_recorded_as_failed_send():
         success=False,
         error_message="SMTP 发送失败，请检查服务器、端口、加密方式和账号配置",
     )
+
+
+def test_compatible_mailer_failure_result_is_redacted_in_execution_details(caplog):
+    mailer = FakeMailer(
+        results=[MailSendResult(success=False, error_message="SMTP_PASSWORD=mailer-secret")]
+    )
+    executor = RuleExecutor(sql_client=FakeSqlClient([{"id": 1, "amount": 100}]), mailer=mailer)
+
+    with caplog.at_level("ERROR"):
+        result = executor.execute(make_rule())
+
+    assert result.status == ExecutionStatus.FAILED
+    assert result.error_type == "MailSendError"
+    assert result.error_message == "SMTP 发送失败，请检查服务器、端口、加密方式和账号配置"
+    assert result.mail_results[0].result == MailSendResult(
+        success=False,
+        error_message="SMTP 发送失败，请检查服务器、端口、加密方式和账号配置",
+    )
+    assert "error_type=RuntimeError" in caplog.text
+    assert "mailer-secret" not in caplog.text
 
 
 def test_recipients_and_cc_are_parsed_for_messages():

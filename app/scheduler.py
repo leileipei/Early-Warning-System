@@ -4,6 +4,7 @@ from collections.abc import Callable, Iterable
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
 
+from app.error_reporting import log_exception_safely
 from app.models import AlertRule
 
 
@@ -82,8 +83,12 @@ class RuleScheduleSynchronizer:
             try:
                 if self.scheduler.get_job(_job_id(rule_id)) is not None:
                     self.scheduler.remove_job(_job_id(rule_id))
-            except Exception:
-                self.logger.exception("移除规则调度任务失败: rule_id=%s", rule_id)
+            except Exception as exc:
+                log_exception_safely(
+                    self.logger,
+                    f"移除规则调度任务失败: rule_id={rule_id}; operation=remove_rule_schedule",
+                    exc,
+                )
             else:
                 self.known_cron_by_rule_id.pop(rule_id, None)
 
@@ -106,8 +111,12 @@ class RuleScheduleSynchronizer:
                         _job_id(rule_id),
                         trigger=CronTrigger.from_crontab(rule.cron_expression),
                     )
-            except Exception:
-                self.logger.exception("同步规则调度任务失败: rule_id=%s", rule_id)
+            except Exception as exc:
+                log_exception_safely(
+                    self.logger,
+                    f"同步规则调度任务失败: rule_id={rule_id}; operation=sync_rule_schedule",
+                    exc,
+                )
             else:
                 self.known_cron_by_rule_id[rule_id] = cron_signature
 

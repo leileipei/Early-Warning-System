@@ -46,7 +46,7 @@ class SmtpMailer:
             client.sendmail(self.sender, all_recipients, mime.as_string())
             return MailSendResult(success=True)
         except Exception as exc:
-            log_exception_safely(logger, "SMTP send failed", exc)
+            log_exception_safely(logger, "SMTP send failed: operation=smtp_send", exc)
             return MailSendResult(
                 success=False,
                 error_message=public_error_summary(exc, fallback=SMTP_SEND_FAILURE),

@@ -168,7 +168,11 @@ def _execute_rule_once(
             )
         )
     except Exception as exc:
-        log_exception_safely(logger, "Rule execution setup failed", exc)
+        log_exception_safely(
+            logger,
+            f"Rule execution setup failed: rule_id={rule.id}; operation=build_execution_dependencies",
+            exc,
+        )
         return ExecutionAttempt(
             result=ExecutionResult(
                 status=ExecutionStatus.FAILED,

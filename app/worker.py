@@ -53,13 +53,21 @@ def sync_rules_once(
         with factory() as session:
             rules = session.exec(select(AlertRule).where(AlertRule.archived_at.is_(None))).all()
     except Exception as exc:
-        log_exception_safely(active_logger, "读取预警规则失败，保留当前调度任务", exc)
+        log_exception_safely(
+            active_logger,
+            "读取预警规则失败，保留当前调度任务: operation=read_alert_rules",
+            exc,
+        )
         return RuleSyncResult(ok=False, error=public_error_summary(exc, fallback=WORKER_SYNC_FAILURE))
 
     try:
         synchronizer.sync(rules)
     except Exception as exc:
-        log_exception_safely(active_logger, "同步预警规则失败，保留当前调度任务", exc)
+        log_exception_safely(
+            active_logger,
+            "同步预警规则失败，保留当前调度任务: operation=sync_rule_schedules",
+            exc,
+        )
         return RuleSyncResult(ok=False, error=public_error_summary(exc, fallback=WORKER_SYNC_FAILURE))
     return RuleSyncResult(ok=True)
 
@@ -74,7 +82,11 @@ def _record_sync_heartbeat(
         with session_factory() as session:
             record_sync(session, worker_id, ok=result.ok, error=result.error)
     except Exception as exc:
-        log_exception_safely(logger, "记录 Worker 心跳失败", exc)
+        log_exception_safely(
+            logger,
+            f"记录 Worker 心跳失败: worker_id={worker_id}; operation=record_sync_heartbeat",
+            exc,
+        )
 
 
 def _record_start_heartbeat(
@@ -84,14 +96,18 @@ def _record_start_heartbeat(
         with session_factory() as session:
             record_worker_start(session, worker_id)
     except Exception as exc:
-        log_exception_safely(logger, "记录 Worker 启动心跳失败", exc)
+        log_exception_safely(
+            logger,
+            f"记录 Worker 启动心跳失败: worker_id={worker_id}; operation=record_start_heartbeat",
+            exc,
+        )
 
 
 def _cleanup_logs_once(cleanup_logs: Callable[[], object]) -> None:
     try:
         cleanup_logs()
     except Exception as exc:
-        log_exception_safely(logger, "清理过期日志失败", exc)
+        log_exception_safely(logger, "清理过期日志失败: operation=cleanup_expired_logs", exc)
 
 
 def run_sync_loop(
