@@ -58,7 +58,7 @@ def test_dependency_locks_and_automation_configuration_are_release_ready():
     assert "python -m pip install -r requirements-dev.lock" in commands
     assert "python -m pip check" in commands
     assert "ruff check ." in commands
-    assert "pytest --cov=app --cov-report=term-missing --cov-fail-under=93" in commands
+    assert "python -m pytest --cov=app --cov-report=term-missing --cov-fail-under=93" in commands
     assert "pip-audit -r requirements.lock --strict" in commands
 
     dependabot = yaml.safe_load((ROOT / ".github/dependabot.yml").read_text(encoding="utf-8"))
