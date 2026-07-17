@@ -117,7 +117,7 @@
                   <button class="button button-secondary" type="submit">测试连接</button>
                 </form>
                 <a class="button button-secondary" href="/settings/sql-server/{{ data_source.id }}/edit">编辑</a>
-                <form class="inline-form" method="post" action="/settings/sql-server/{{ data_source.id }}/delete" onsubmit="return confirm('确认删除该数据源吗？');">
+                <form class="inline-form" method="post" action="/settings/sql-server/{{ data_source.id }}/delete" data-confirm="确认删除该数据源吗？">
                   {{ csrf_input(csrf_token) }}
                   <button class="button button-danger" type="submit">删除</button>
                 </form>
@@ -210,7 +210,7 @@
                   <button class="button button-secondary" type="submit">测试发送</button>
                 </form>
                 <a class="button button-secondary" href="/settings/smtp/{{ smtp_config.id }}/edit">编辑</a>
-                <form class="inline-form" method="post" action="/settings/smtp/{{ smtp_config.id }}/delete" onsubmit="return confirm('确认删除该 SMTP 配置吗？');">
+                <form class="inline-form" method="post" action="/settings/smtp/{{ smtp_config.id }}/delete" data-confirm="确认删除该 SMTP 配置吗？">
                   {{ csrf_input(csrf_token) }}
                   <button class="button button-danger" type="submit">删除</button>
                 </form>

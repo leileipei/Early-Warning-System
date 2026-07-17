@@ -1,6 +1,6 @@
 from fastapi import FastAPI, HTTPException, Request, Response, status
 from fastapi.exception_handlers import http_exception_handler
-from fastapi.responses import RedirectResponse
+from fastapi.responses import PlainTextResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.sessions import SessionMiddleware
 
@@ -10,7 +10,7 @@ from app.health import ReadinessResult, check_readiness
 from app.paths import STATIC_DIR
 from app.routes import router as page_router
 from app.settings import get_settings
-from app.web_security import LoginRateLimiter
+from app.web_security import SecurityHeadersMiddleware, apply_security_headers, LoginRateLimiter
 
 
 def create_app() -> FastAPI:
@@ -28,6 +28,10 @@ def create_app() -> FastAPI:
         same_site="lax",
         max_age=settings.session_max_age_seconds,
     )
+    app.add_middleware(
+        SecurityHeadersMiddleware,
+        enable_hsts=settings.session_cookie_secure,
+    )
     app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
     app.include_router(auth_router)
     app.include_router(page_router)
@@ -42,6 +46,12 @@ def create_app() -> FastAPI:
         ):
             return RedirectResponse("/login", status_code=status.HTTP_303_SEE_OTHER)
         return await http_exception_handler(request, exc)
+
+    @app.exception_handler(Exception)
+    async def handle_unexpected_exception(_request: Request, _exc: Exception):
+        # ServerErrorMiddleware renders unhandled exceptions outside user middleware.
+        response = PlainTextResponse("Internal Server Error", status_code=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        return apply_security_headers(response, enable_hsts=settings.session_cookie_secure)
 
     @app.get("/health")
     def health() -> dict[str, str]:

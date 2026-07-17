@@ -34,6 +34,25 @@ from app.web_security import require_csrf
 
 VALID_FERNET_KEY = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
 CSRF_PATTERN = re.compile(r'name="_csrf_token" value="([^"]+)"')
+SECURITY_HEADERS = {
+    "x-content-type-options": "nosniff",
+    "referrer-policy": "same-origin",
+    "permissions-policy": "camera=(), microphone=(), geolocation=()",
+    "x-frame-options": "DENY",
+}
+
+
+def _assert_security_headers(response, *, hsts: bool = False):
+    for header, value in SECURITY_HEADERS.items():
+        assert response.headers[header] == value
+    assert "default-src 'self'" in response.headers["content-security-policy"]
+    assert "script-src 'self'" in response.headers["content-security-policy"]
+    assert "'unsafe-inline'" not in response.headers["content-security-policy"]
+    assert "frame-ancestors 'none'" in response.headers["content-security-policy"]
+    if hsts:
+        assert response.headers["strict-transport-security"] == "max-age=31536000; includeSubDomains"
+    else:
+        assert "strict-transport-security" not in response.headers
 
 
 def _set_required_settings(monkeypatch):
@@ -417,6 +436,61 @@ def test_login_page_renders_csrf_hidden_field(monkeypatch):
         get_settings.cache_clear()
 
 
+def test_security_headers_cover_login_redirect_and_not_found_responses(monkeypatch):
+    _set_required_settings(monkeypatch)
+    create_app, get_settings = _load_create_app()
+    try:
+        client = TestClient(create_app())
+
+        login_response = client.get("/login")
+        redirect_response = client.get(
+            "/",
+            headers={"accept": "text/html"},
+            follow_redirects=False,
+        )
+        not_found_response = client.get("/does-not-exist")
+
+        for response in (login_response, redirect_response, not_found_response):
+            _assert_security_headers(response)
+    finally:
+        get_settings.cache_clear()
+
+
+def test_security_headers_cover_admin_and_unhandled_error_responses(monkeypatch, session):
+    client, get_settings, app = _client_with_admin(monkeypatch, session)
+
+    @app.get("/security-header-error")
+    def security_header_error():
+        raise RuntimeError("expected test error")
+
+    try:
+        admin_response = client.get("/rules")
+        error_response = TestClient(app, raise_server_exceptions=False).get("/security-header-error")
+
+        assert error_response.status_code == 500
+        _assert_security_headers(admin_response)
+        _assert_security_headers(error_response)
+    finally:
+        app.dependency_overrides.clear()
+        get_settings.cache_clear()
+
+
+@pytest.mark.parametrize(
+    ("secure_value", "expects_hsts"),
+    [("false", False), ("true", True)],
+)
+def test_hsts_follows_session_cookie_secure_configuration(monkeypatch, secure_value, expects_hsts):
+    _set_required_settings(monkeypatch)
+    monkeypatch.setenv("SESSION_COOKIE_SECURE", secure_value)
+    create_app, get_settings = _load_create_app()
+    try:
+        response = TestClient(create_app()).get("/login")
+
+        _assert_security_headers(response, hsts=expects_hsts)
+    finally:
+        get_settings.cache_clear()
+
+
 @pytest.mark.parametrize(
     ("path", "minimum_form_count"),
     [("/rules", 2), ("/rules/new", 2), ("/settings", 3)],
@@ -438,6 +512,15 @@ def test_sql_ajax_requests_include_csrf_token():
     script = Path("app/static/app.js").read_text(encoding="utf-8")
 
     assert script.count('payload.append("_csrf_token"') == 2
+
+
+def test_templates_do_not_include_inline_script_or_event_attributes():
+    for template_path in Path("app/templates").glob("*.html"):
+        template = template_path.read_text(encoding="utf-8")
+
+        script_contents = re.findall(r"<script\b[^>]*>(.*?)</script>", template, flags=re.DOTALL | re.I)
+        assert all(not script.strip() for script in script_contents), template_path
+        assert re.search(r"\son[a-z]+\s*=", template, flags=re.I) is None, template_path
 
 
 def test_dashboard_redirects_browser_to_login_when_unauthenticated(monkeypatch):

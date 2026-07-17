@@ -8,12 +8,42 @@ from dataclasses import dataclass, field
 from hashlib import sha256
 from threading import Lock
 
-from fastapi import HTTPException, Request, status
+from fastapi import HTTPException, Request, Response, status
+from starlette.middleware.base import BaseHTTPMiddleware
 
 CSRF_SESSION_KEY = "_csrf_token"
 CSRF_FORM_FIELD = "_csrf_token"
 CSRF_ERROR = "请求安全校验失败"
 UNSAFE_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
+CONTENT_SECURITY_POLICY = (
+    "default-src 'self'; script-src 'self'; style-src 'self'; "
+    "img-src 'self' data:; connect-src 'self'; object-src 'none'; "
+    "base-uri 'self'; form-action 'self'; frame-ancestors 'none'"
+)
+STRICT_TRANSPORT_SECURITY = "max-age=31536000; includeSubDomains"
+
+
+def apply_security_headers(response: Response, *, enable_hsts: bool) -> Response:
+    response.headers["Content-Security-Policy"] = CONTENT_SECURITY_POLICY
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["Referrer-Policy"] = "same-origin"
+    response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
+    response.headers["X-Frame-Options"] = "DENY"
+    if enable_hsts:
+        response.headers["Strict-Transport-Security"] = STRICT_TRANSPORT_SECURITY
+    elif "Strict-Transport-Security" in response.headers:
+        del response.headers["Strict-Transport-Security"]
+    return response
+
+
+class SecurityHeadersMiddleware(BaseHTTPMiddleware):
+    def __init__(self, app, *, enable_hsts: bool):
+        super().__init__(app)
+        self.enable_hsts = enable_hsts
+
+    async def dispatch(self, request: Request, call_next):
+        response = await call_next(request)
+        return apply_security_headers(response, enable_hsts=self.enable_hsts)
 
 
 @dataclass
