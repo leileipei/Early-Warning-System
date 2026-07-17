@@ -76,6 +76,17 @@ def test_redact_sensitive_text_fails_closed_for_unterminated_values_and_odbc_ali
     assert "unrelated_next=keep2" in rendered
 
 
+def test_redact_sensitive_text_fails_closed_when_closed_values_have_trailing_fragments():
+    rendered = redact_sensitive_text(
+        'SMTP_PASSWORD="alpha"QUOTEDTAIL; '
+        "UID={beta}UIDCLOSEDTAIL; "
+        'SERVER="gamma"SERVERCLOSEDTAIL'
+    )
+
+    for secret in ("alpha", "beta", "gamma", "QUOTEDTAIL", "UIDCLOSEDTAIL", "SERVERCLOSEDTAIL"):
+        assert secret not in rendered
+
+
 def test_log_exception_safely_keeps_a_bounded_redacted_traceback(caplog):
     logger = logging.getLogger("tests.error_reporting")
     fernet_key = "b" * 43 + "="

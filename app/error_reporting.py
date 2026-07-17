@@ -4,9 +4,9 @@ import traceback
 from uuid import uuid4
 
 
-_DOUBLE_QUOTED_VALUE = r'"(?:\\.|[^"\\])*"'
-_SINGLE_QUOTED_VALUE = r"'(?:\\.|[^'\\])*'"
-_ODBC_BRACED_VALUE = r"\{(?:}}|[^}])*\}(?!})"
+_DOUBLE_QUOTED_VALUE = r'"(?:\\.|[^"\\])*"(?=[;\s]|\Z)'
+_SINGLE_QUOTED_VALUE = r"'(?:\\.|[^'\\])*'(?=[;\s]|\Z)"
+_ODBC_BRACED_VALUE = r"\{(?:}}|[^}])*\}(?!})(?=[;\s]|\Z)"
 _UNTERMINATED_DOUBLE_QUOTED_VALUE = r'"[^\r\n]*'
 _UNTERMINATED_SINGLE_QUOTED_VALUE = r"'[^\r\n]*"
 _UNTERMINATED_ODBC_BRACED_VALUE = r"\{[^\r\n]*"
