@@ -11,7 +11,7 @@ dependencies = [
   "jinja2>=3.1.6",
   "pydantic-settings>=2.2",
   "pyodbc>=5.1",
-  "python-multipart>=0.0.9",
+  "python-multipart>=0.0.32",
   "sqlmodel>=0.0.22",
   "uvicorn[standard]>=0.29",
 ]
