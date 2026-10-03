@@ -62,7 +62,25 @@ Python 3.11 使用临时虚拟环境，不替换工作区原有 .venv。
 两份原有未跟踪的 2026-07-14 计划文档留在工作区，不加入提交。
 数据库、.env、临时环境、密钥和真实密码不上传。
 
-本报告初始提交时 GitHub CI 待执行；远端验证结果将在核对具体提交后补充。
+代码修复已提交并推送：`c3756350212635c1f752d30d4f2545865efa6374`。
+审查入口：[PR #11](https://github.com/leileipei/Early-Warning-System/pull/11)。
+
+| 远端验证 | 记录 | 结果 |
+| --- | --- | --- |
+| 分支 push CI | [37090980352](https://github.com/leileipei/Early-Warning-System/actions/runs/37090980352) | Python 3.11/3.12/3.13 全部 success |
+| PR 合并视图 CI | [37091004468](https://github.com/leileipei/Early-Warning-System/actions/runs/37091004468) | Python 3.11/3.12/3.13 全部 success |
+
+已核对两条流水线 headSha 均对应上述修复提交，各版本任务均完成依赖安装、
+pip check、Ruff、完整 pytest、93% 覆盖率门槛，以及生产和开发锁文件扫描。
+分支 CI 的三个版本覆盖率均为 94.17%；3.11 和 3.12 日志分别为 579 passed。
+PR 在核对时为 OPEN、MERGEABLE、CLEAN，六项检查全部 SUCCESS；未执行合并。
+
+CI 还有非阻断提示：现有 checkout@v4、setup-python@v5 标注的 Node.js 20
+被 Runner 强制改为 Node.js 24，以及 ubuntu-latest 后续系统镜像迁移提示。
+本批不升级 Actions 主版本或改变 Runner 选择，后续应单独验证并更新 CI 基础配置。
+
+本节记录代码提交的已完成检查。补充本报告的文档提交将触发新一轮 CI，
+须按 PR 最新 headRefOid 核对最终检查，不把前一个提交的绿灯当作最新状态。
 
 ## 5. 生产验收待办
 
