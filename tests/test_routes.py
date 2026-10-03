@@ -1,4 +1,6 @@
 import importlib
+import csv
+import io
 import json
 import re
 from asyncio import run
@@ -223,8 +225,9 @@ def test_navigation_marks_the_current_page(monkeypatch, session):
         response = client.get("/rules")
 
         assert response.status_code == 200
-        assert 'class="nav-link is-active" href="/rules" aria-current="page"' in response.text
-        assert 'class="nav-link" href="/logs">日志</a>' in response.text
+        assert 'class="side-link is-active" href="/rules" aria-current="page"' in response.text
+        assert 'class="side-link" href="/logs"' in response.text
+        assert ">日志</span>" in response.text
     finally:
         get_settings.cache_clear()
 
@@ -848,9 +851,9 @@ def test_rules_page_uses_semantic_status_classes(monkeypatch, session):
         response = client.get("/rules")
 
         assert response.status_code == 200
-        assert '<span class="status-text status-success">启用</span>' in response.text
-        assert '<span class="status-text status-muted">停用</span>' in response.text
-        assert 'class="button button-danger"' in response.text
+        assert '<span class="badge badge-success">启用</span>' in response.text
+        assert '<span class="badge badge-muted">停用</span>' in response.text
+        assert 'class="button button-danger button-sm"' in response.text
     finally:
         app.dependency_overrides.clear()
         get_settings.cache_clear()
@@ -1367,6 +1370,32 @@ def test_validate_rule_sql_rejects_invalid_sql_before_connecting(monkeypatch, se
 
         assert response.status_code == 400
         assert response.json() == {"valid": False, "message": "只允许 SELECT 查询"}
+    finally:
+        app.dependency_overrides.clear()
+        get_settings.cache_clear()
+
+
+@pytest.mark.parametrize("endpoint", ["/rules/validate-sql", "/rules/preview-sql"])
+def test_sql_page_endpoints_block_unseparated_batch_before_connecting(
+    monkeypatch, session, endpoint
+):
+    source = _create_data_source(session)
+    routes = importlib.import_module("app.routes")
+    monkeypatch.setattr(
+        routes, "build_sql_client", lambda source: pytest.fail("unsafe SQL must not reach the adapter")
+    )
+    client, get_settings, app = _client_with_admin(monkeypatch, session)
+    try:
+        response = client.post(endpoint, data={
+            "data_source_id": str(source.id),
+            "sql_text": "SELECT 1 GRANT SELECT TO public",
+            "query_timeout_seconds": "12",
+        })
+
+        assert response.status_code == 400
+        assert "无法安全解析" in response.json()["message"]
+        assert session.exec(select(ExecutionLog)).all() == []
+        assert session.exec(select(MailLog)).all() == []
     finally:
         app.dependency_overrides.clear()
         get_settings.cache_clear()
@@ -2040,9 +2069,9 @@ def test_settings_page_uses_semantic_status_classes(monkeypatch, session):
         response = client.get("/settings")
 
         assert response.status_code == 200
-        assert response.text.count('<span class="status-text status-success">启用</span>') >= 2
-        assert response.text.count('<span class="status-text status-muted">停用</span>') >= 2
-        assert response.text.count('class="button button-danger"') >= 2
+        assert response.text.count('<span class="badge badge-success">启用</span>') >= 2
+        assert response.text.count('<span class="badge badge-muted">停用</span>') >= 2
+        assert response.text.count('class="button button-danger button-sm"') >= 2
     finally:
         app.dependency_overrides.clear()
         get_settings.cache_clear()
@@ -2938,6 +2967,46 @@ def test_two_column_children_can_shrink_below_intrinsic_content_width():
     assert ".two-column > * {\n  min-width: 0;\n}" in stylesheet
 
 
+def test_stylesheet_defines_dark_theme_overrides():
+    stylesheet = Path("app/static/styles.css").read_text(encoding="utf-8")
+
+    assert '[data-theme="dark"] {' in stylesheet
+    dark_block = stylesheet.split('[data-theme="dark"] {', 1)[1]
+    assert "--bg:" in dark_block
+    assert "--surface:" in dark_block
+    assert "--primary:" in dark_block
+
+
+def test_base_template_loads_theme_script_before_stylesheet():
+    template = Path("app/templates/base.html").read_text(encoding="utf-8")
+
+    assert "/static/theme.js" in template
+    assert template.index("/static/theme.js") < template.index("/static/styles.css")
+
+
+def test_settings_page_uses_tabs_for_config_sections(monkeypatch, session):
+    client, get_settings, app = _client_with_admin(monkeypatch, session)
+    try:
+        response = client.get("/settings")
+
+        assert response.status_code == 200
+        assert 'role="tablist"' in response.text
+        assert 'data-settings-tab="sql"' in response.text
+        assert 'data-settings-tab="smtp"' in response.text
+        assert 'data-settings-panel="sql"' in response.text
+        assert 'data-settings-panel="smtp" role="tabpanel" hidden' in response.text
+    finally:
+        app.dependency_overrides.clear()
+        get_settings.cache_clear()
+
+
+def test_settings_tab_switching_script_present():
+    script = Path("app/static/app.js").read_text(encoding="utf-8")
+
+    assert "data-settings-tab" in script
+    assert "sessionStorage" in script
+
+
 def test_logs_page_uses_semantic_status_classes(monkeypatch, session):
     data_source = _create_data_source(session)
     rule = _create_rule(session, data_source)
@@ -2975,10 +3044,10 @@ def test_logs_page_uses_semantic_status_classes(monkeypatch, session):
         response = client.get("/logs")
 
         assert response.status_code == 200
-        assert '<span class="status-text status-success">success</span>' in response.text
-        assert '<span class="status-text status-warning">running</span>' in response.text
-        assert '<span class="status-text status-danger">partial_failed</span>' in response.text
-        assert '<span class="status-text status-danger">failed</span>' in response.text
+        assert '<span class="badge badge-success">成功</span>' in response.text
+        assert '<span class="badge badge-warning">运行中</span>' in response.text
+        assert '<span class="badge badge-danger">部分失败</span>' in response.text
+        assert '<span class="badge badge-danger">失败</span>' in response.text
     finally:
         app.dependency_overrides.clear()
         get_settings.cache_clear()
@@ -3064,6 +3133,45 @@ def test_logs_page_filters_mail_logs_by_status_and_keyword(monkeypatch, session)
         assert "库存预警" not in response.text
         assert 'value="failed" selected' in response.text
         assert 'value="ops"' in response.text
+    finally:
+        app.dependency_overrides.clear()
+        get_settings.cache_clear()
+
+
+@pytest.mark.parametrize("status", ["success", "failed", "partial_failed"])
+def test_mail_log_statuses_remain_filterable_and_exportable(monkeypatch, session, status):
+    data_source = _create_data_source(session)
+    rule = _create_rule(session, data_source)
+    execution_log = ExecutionLog(rule_id=rule.id, trigger_type=TriggerType.MANUAL)
+    session.add(execution_log)
+    session.commit()
+    session.refresh(execution_log)
+    for value in ("success", "failed", "partial_failed"):
+        session.add(
+            MailLog(
+                execution_log_id=execution_log.id,
+                recipients="ops@example.com",
+                subject=f"mail-{value}",
+                status=MailStatus(value),
+            )
+        )
+    session.commit()
+    client, get_settings, app = _client_with_admin(monkeypatch, session)
+    try:
+        response = client.get(f"/logs?mail_status={status}")
+
+        assert response.status_code == 200
+        assert f'value="{status}" selected' in response.text
+        assert f"mail-{status}" in response.text
+        for other in {"success", "failed", "partial_failed"} - {status}:
+            assert f"mail-{other}" not in response.text
+        if status == "partial_failed":
+            assert '<span class="badge badge-danger">部分失败</span>' in response.text
+
+        exported = client.get("/logs/mails.csv")
+        assert exported.status_code == 200
+        rows = list(csv.DictReader(io.StringIO(exported.content.decode("utf-8-sig"))))
+        assert {row["状态"] for row in rows} == {"success", "failed", "partial_failed"}
     finally:
         app.dependency_overrides.clear()
         get_settings.cache_clear()

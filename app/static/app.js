@@ -125,16 +125,190 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   };
 
+  /* ============ 主题切换 ============ */
+  document.querySelectorAll("[data-theme-toggle]").forEach((button) => {
+    button.addEventListener("click", () => {
+      if (window.ewsTheme) {
+        window.ewsTheme.toggle();
+      }
+    });
+  });
+
+  /* ============ 侧边栏（移动端抽屉） ============ */
+  const sidebar = document.querySelector("[data-sidebar]");
+  const backdrop = document.querySelector("[data-sidebar-backdrop]");
+  const setSidebarOpen = (open) => {
+    if (!sidebar) {
+      return;
+    }
+    sidebar.classList.toggle("is-open", open);
+    backdrop?.classList.toggle("is-visible", open);
+    document
+      .querySelectorAll("[data-sidebar-toggle]")
+      .forEach((button) => button.setAttribute("aria-expanded", String(open)));
+  };
+
+  document.querySelectorAll("[data-sidebar-toggle]").forEach((button) => {
+    button.addEventListener("click", () => {
+      setSidebarOpen(!sidebar?.classList.contains("is-open"));
+    });
+  });
+  backdrop?.addEventListener("click", () => setSidebarOpen(false));
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") {
+      setSidebarOpen(false);
+    }
+  });
+
+  /* ============ 规则列表前端过滤 ============ */
+  const ruleFilterInput = document.querySelector("[data-rule-filter]");
+  if (ruleFilterInput) {
+    const ruleRows = Array.from(document.querySelectorAll("[data-rule-row]"));
+    const ruleEmptyRow = document.querySelector("[data-rule-empty]");
+    ruleFilterInput.addEventListener("input", () => {
+      const keyword = ruleFilterInput.value.trim().toLowerCase();
+      let visibleCount = 0;
+      ruleRows.forEach((row) => {
+        const haystack = `${row.dataset.name || ""} ${row.dataset.cron || ""}`.toLowerCase();
+        const matched = !keyword || haystack.includes(keyword);
+        row.hidden = !matched;
+        if (matched) {
+          visibleCount += 1;
+        }
+      });
+      if (ruleEmptyRow) {
+        ruleEmptyRow.hidden = visibleCount !== 0;
+      }
+    });
+  }
+
+  /* ============ 配置页页签 ============ */
+  const settingsTabButtons = document.querySelectorAll("[data-settings-tab]");
+  if (settingsTabButtons.length) {
+    const settingsPanels = document.querySelectorAll("[data-settings-panel]");
+    const tabStorageKey = "settings-tab";
+    const validTabs = ["sql", "smtp"];
+
+    const activateSettingsTab = (name, persist) => {
+      const target = validTabs.includes(name) ? name : "sql";
+      settingsTabButtons.forEach((button) => {
+        const isActive = button.dataset.settingsTab === target;
+        button.classList.toggle("is-active", isActive);
+        button.setAttribute("aria-selected", String(isActive));
+      });
+      settingsPanels.forEach((panel) => {
+        panel.hidden = panel.dataset.settingsPanel !== target;
+      });
+      if (persist) {
+        try {
+          window.sessionStorage.setItem(tabStorageKey, target);
+        } catch (_error) {
+          /* 无法持久化时仅切换当前页 */
+        }
+      }
+    };
+
+    settingsTabButtons.forEach((button) => {
+      button.addEventListener("click", () => activateSettingsTab(button.dataset.settingsTab, true));
+    });
+    /* 表单提交前记住所在页签，提交重定向回来后恢复 */
+    settingsPanels.forEach((panel) => {
+      panel.querySelectorAll("form").forEach((form) => {
+        form.addEventListener("submit", () => {
+          try {
+            window.sessionStorage.setItem(tabStorageKey, panel.dataset.settingsPanel);
+          } catch (_error) {
+            /* 无法持久化时保持默认页签 */
+          }
+        });
+      });
+    });
+
+    let initialTab = null;
+    try {
+      initialTab = window.sessionStorage.getItem(tabStorageKey);
+    } catch (_error) {
+      initialTab = null;
+    }
+    const tabParam = new URLSearchParams(window.location.search).get("tab");
+    activateSettingsTab(tabParam || initialTab || "sql", false);
+  }
+
+  /* ============ 成功提示自动消退 ============ */
+  document.querySelectorAll(".form-success").forEach((notice) => {
+    window.setTimeout(() => {
+      notice.classList.add("is-dismissing");
+      notice.addEventListener("transitionend", () => notice.remove(), { once: true });
+    }, 4500);
+  });
+
+  /* ============ 确认模态框 ============ */
+  const openConfirmModal = (message, onConfirm) => {
+    const overlay = document.createElement("div");
+    overlay.className = "modal-overlay";
+
+    const dialog = document.createElement("div");
+    dialog.className = "modal";
+    dialog.setAttribute("role", "alertdialog");
+    dialog.setAttribute("aria-modal", "true");
+
+    const title = document.createElement("h2");
+    title.textContent = "确认操作";
+
+    const body = document.createElement("p");
+    body.textContent = message;
+
+    const actions = document.createElement("div");
+    actions.className = "modal-actions";
+
+    const cancelButton = document.createElement("button");
+    cancelButton.type = "button";
+    cancelButton.className = "button button-secondary";
+    cancelButton.textContent = "取消";
+
+    const confirmButton = document.createElement("button");
+    confirmButton.type = "button";
+    confirmButton.className = "button button-danger";
+    confirmButton.textContent = "确认";
+
+    const close = () => overlay.remove();
+    cancelButton.addEventListener("click", close);
+    overlay.addEventListener("click", (event) => {
+      if (event.target === overlay) {
+        close();
+      }
+    });
+    document.addEventListener("keydown", function onEscape(event) {
+      if (event.key === "Escape") {
+        close();
+        document.removeEventListener("keydown", onEscape);
+      }
+    });
+    confirmButton.addEventListener("click", () => {
+      close();
+      onConfirm();
+    });
+
+    actions.append(cancelButton, confirmButton);
+    dialog.append(title, body, actions);
+    overlay.appendChild(dialog);
+    document.body.appendChild(overlay);
+    confirmButton.focus();
+  };
+
+  /* ============ 表单提交拦截 ============ */
   document.addEventListener("submit", (event) => {
     const form = event.target;
     if (!(form instanceof HTMLFormElement) || !form.dataset.confirm) {
       return;
     }
-    if (!window.confirm(form.dataset.confirm)) {
-      event.preventDefault();
-    }
+    event.preventDefault();
+    openConfirmModal(form.dataset.confirm, () => {
+      form.submit();
+    });
   });
 
+  /* ============ SQL 检测 / 预览按钮 ============ */
   document.addEventListener("click", async (event) => {
     if (!(event.target instanceof Element)) {
       return;

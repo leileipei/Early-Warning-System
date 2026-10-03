@@ -1,5 +1,7 @@
 import importlib
+from datetime import UTC, datetime
 from unittest.mock import Mock
+from zoneinfo import ZoneInfo
 
 import pytest
 from apscheduler.triggers.cron import CronTrigger
@@ -54,6 +56,35 @@ def test_scheduler_adds_enabled_rule_job():
     assert len(jobs) == 1
     assert jobs[0].id == "rule-7"
     assert list(jobs[0].args) == [7]
+
+
+@pytest.mark.parametrize("host_timezone", ["UTC", "America/New_York"])
+@pytest.mark.parametrize("operation", ["initial", "add", "reschedule"])
+def test_rule_cron_fires_in_shanghai_independently_of_host_timezone(
+    monkeypatch, host_timezone, operation
+):
+    monkeypatch.setattr(
+        "apscheduler.triggers.cron.get_localzone",
+        lambda: ZoneInfo(host_timezone),
+    )
+    def callback(rule_id):
+        return None
+    scheduler = build_scheduler(
+        [] if operation == "add" else [make_rule()], execute_rule=callback
+    )
+    if operation != "initial":
+        synchronizer = RuleScheduleSynchronizer(scheduler, execute_rule=callback)
+        synchronizer.sync(
+            [make_rule(cron_expression="0 10 * * *" if operation == "reschedule" else "0 9 * * *")]
+        )
+
+    trigger = scheduler.get_job("rule-7").trigger
+    next_fire = trigger.get_next_fire_time(None, datetime(2026, 10, 3, tzinfo=UTC))
+
+    expected_hour = 10 if operation == "reschedule" else 9
+    assert next_fire.astimezone(ZoneInfo("Asia/Shanghai")) == datetime(
+        2026, 10, 3, expected_hour, tzinfo=ZoneInfo("Asia/Shanghai")
+    )
 
 
 def test_scheduler_passes_misfire_options_when_building_initial_jobs(monkeypatch):
