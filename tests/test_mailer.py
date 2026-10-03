@@ -1,6 +1,8 @@
 from email import message_from_string
 import re
 
+import pytest
+
 from app.mailer import EmailMessage, MailSendResult, SmtpMailer
 
 
@@ -12,6 +14,7 @@ class FakeSmtpClient:
     def sendmail(self, sender, recipients, body):
         self.events.append("sendmail")
         self.sent.append((sender, recipients, body))
+        return {}
 
     def quit(self):
         self.events.append("quit")
@@ -168,3 +171,38 @@ def test_smtp_mailer_falls_back_to_close_when_quit_raises():
 
     assert result == MailSendResult(success=True, error_message="")
     assert fake.events == ["sendmail", "quit", "close"]
+
+
+@pytest.mark.parametrize(
+    ("refused_addresses", "expected_partial"),
+    [
+        (["ops@example.com"], True),
+        (["audit@example.com"], True),
+        (["ops@example.com", "audit@example.com"], False),
+    ],
+    ids=["to-refused", "cc-refused", "all-refused"],
+)
+def test_smtp_mailer_does_not_report_refused_recipients_as_success(
+    refused_addresses, expected_partial, caplog
+):
+    class RefusingSmtpClient(FakeSmtpClient):
+        def sendmail(self, sender, recipients, body):
+            super().sendmail(sender, recipients, body)
+            return {address: (550, b"SMTP_PASSWORD=smtp-secret") for address in refused_addresses}
+
+    client = RefusingSmtpClient()
+    message = EmailMessage(
+        recipients=["ops@example.com"],
+        cc_recipients=["audit@example.com"],
+        subject="预警",
+        html_body="<p>test</p>",
+    )
+
+    result = SmtpMailer("alerts@example.com", lambda: client).send(message)
+
+    assert result.success is False
+    assert result.partial_success is expected_partial
+    assert result.error_message
+    assert "smtp-secret" not in result.error_message
+    assert "smtp-secret" not in caplog.text
+    assert client.events == ["sendmail", "quit"]

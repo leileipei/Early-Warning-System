@@ -14,6 +14,8 @@ from app.models import (
     AlertSuppression,
     AlertRuleVersion,
     ExecutionLog,
+    MailLog,
+    MailStatus,
     RuleExecutionLease,
     SendMode,
     SmtpConfig,
@@ -126,6 +128,56 @@ def test_init_db_adds_session_version_to_existing_admin_user_table(tmp_path):
         user = session.get(AdminUser, 1)
         assert user is not None
         assert user.session_version == 1
+
+
+def test_partial_mail_status_round_trips_with_legacy_sqlite_log_schema(tmp_path):
+    from app.db import create_db_engine, init_db
+
+    engine = create_db_engine(f"sqlite:///{tmp_path / 'legacy-mail.sqlite3'}")
+    with engine.begin() as connection:
+        connection.execute(
+            text(
+                "CREATE TABLE maillog ("
+                "id INTEGER PRIMARY KEY, execution_log_id INTEGER NOT NULL, recipients VARCHAR NOT NULL, "
+                "cc_recipients VARCHAR NOT NULL, subject VARCHAR NOT NULL, status VARCHAR(7) NOT NULL, "
+                "error_message VARCHAR NOT NULL, sent_at DATETIME NOT NULL, "
+                "FOREIGN KEY(execution_log_id) REFERENCES executionlog(id))"
+            )
+        )
+    init_db(engine)
+    with Session(engine) as session:
+        rule = _create_rule(session)
+        execution_log = ExecutionLog(rule_id=rule.id, trigger_type=TriggerType.MANUAL)
+        session.add(execution_log)
+        session.commit()
+        session.refresh(execution_log)
+        for stored_status in ("SUCCESS", "FAILED"):
+            session.exec(
+                text(
+                    "INSERT INTO maillog "
+                    "(execution_log_id, recipients, cc_recipients, subject, status, error_message, sent_at) "
+                    "VALUES (:execution_id, 'ops@example.com', '', 'legacy', :status, '', :sent_at)"
+                ),
+                params={
+                    "execution_id": execution_log.id,
+                    "status": stored_status,
+                    "sent_at": utc_now().isoformat(),
+                },
+            )
+        session.add(
+            MailLog(
+                execution_log_id=execution_log.id,
+                recipients="ops@example.com,audit@example.com",
+                subject="partial",
+                status=MailStatus.PARTIAL_FAILED,
+            )
+        )
+        session.commit()
+    init_db(engine)
+    with Session(engine) as session:
+        statuses = [log.status.value for log in session.exec(select(MailLog).order_by(MailLog.id))]
+        assert statuses == ["success", "failed", "partial_failed"]
+    engine.dispose()
 
 
 def test_init_db_creates_rule_execution_lease_table(engine):

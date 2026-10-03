@@ -49,13 +49,21 @@ pip install -r requirements.lock
 pip install --no-deps .
 ```
 
-锁文件由 Python 3.11 环境生成，适用于受支持的 Python 3.11-3.13。升级依赖时使用开发环境更新两份锁文件，并一同提交：
+当前锁文件由 Python 3.12 环境生成，项目声明支持 Python 3.11-3.13。
+每次发布须通过对应版本 CI 矩阵；2026-10-03 修复目前仅在本地 Python 3.12 验证。
+升级依赖时使用开发环境更新两份锁文件，并一同提交：
 
 ```bash
 .venv/bin/python -m pip install -U pip-tools
-.venv/bin/pip-compile --strip-extras --resolver=backtracking --output-file=requirements.lock pyproject.toml
-.venv/bin/pip-compile --extra=dev --strip-extras --resolver=backtracking --output-file=requirements-dev.lock pyproject.toml
+.venv/bin/pip-compile --strip-extras --resolver=backtracking --no-emit-index-url --no-emit-trusted-host --output-file=requirements.lock pyproject.toml
+.venv/bin/pip-compile --extra=dev --strip-extras --resolver=backtracking --no-emit-index-url --no-emit-trusted-host --output-file=requirements-dev.lock pyproject.toml
+.venv/bin/pip-audit -r requirements.lock --strict
+.venv/bin/pip-audit -r requirements-dev.lock --strict
 ```
+
+如只升级某个安全修复包，使用 pip-compile 的 `--upgrade-package 包名==已审核版本`，
+避免无关依赖全量升级。安装新版 cryptography 时保留原 SECRET_KEY，无需重新加密已有配置。
+本次版本变化、合成密文兼容性和扫描结果见 [依赖修复报告](audit-dependency-fix-2026-10-03.md)。
 
 ## 5. 配置环境变量
 

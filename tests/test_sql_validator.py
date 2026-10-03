@@ -90,3 +90,51 @@ def test_rejects_any_non_comment_content_after_real_semicolon(sql):
 def test_rejects_non_read_only_sql(sql):
     with pytest.raises(SqlValidationError):
         validate_select_sql(sql)
+
+
+@pytest.mark.parametrize(
+    "sql",
+    [
+        "SELECT 1 AS id GRANT SELECT TO public",
+        "SELECT 1 DENY SELECT TO public",
+        "SELECT 1 REVOKE SELECT FROM public",
+        "SELECT 1 WAITFOR DELAY '00:00:05'",
+        "SELECT 1 DBCC CHECKDB",
+        "SELECT 1 SELECT 2",
+        "SELECT 1 SET PARSEONLY OFF DELETE FROM orders",
+        "SELECT NEXT VALUE FOR dbo.warning_sequence",
+        "SELECT 1 AS id WITH c AS (SELECT 2 AS id) SELECT id FROM c",
+    ],
+)
+def test_rejects_unseparated_batches_and_state_changing_queries(sql):
+    with pytest.raises(SqlValidationError):
+        validate_select_sql(sql)
+
+
+@pytest.mark.parametrize(
+    "sql",
+    [
+        "SELECT [update], [delete], [into] FROM [drop]",
+        'SELECT "update", "delete" FROM "drop"',
+        "SELECT [semi;colon] FROM [orders]",
+        "SELECT TOP (5) [update] FROM dbo.orders ORDER BY [update] DESC",
+        "WITH c AS (SELECT [delete] AS id FROM dbo.orders) SELECT id FROM c UNION ALL SELECT 1",
+        "SELECT 1 /* outer /* inner */ DROP is still a comment */",
+    ],
+)
+def test_accepts_quoted_identifiers_and_read_only_tsql_structures(sql):
+    validate_select_sql(sql)
+
+
+@pytest.mark.parametrize(
+    "sql",
+    [
+        "WITH c AS (VACUUM 'PWD=validator-secret') SELECT * FROM c",
+        "WITH c AS (FOOBAR 'PWD=validator-secret') SELECT * FROM c",
+    ],
+)
+def test_rejects_unsupported_cte_bodies_without_leaking_sql(sql, caplog):
+    with pytest.raises(SqlValidationError) as error:
+        validate_select_sql(sql)
+    assert "validator-secret" not in str(error.value)
+    assert "validator-secret" not in caplog.text

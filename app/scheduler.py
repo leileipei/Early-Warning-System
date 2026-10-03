@@ -8,6 +8,7 @@ from app.error_reporting import log_exception_safely
 from app.models import AlertRule
 
 RULE_SCHEDULE_SYNC_FAILURE = "规则调度同步未完全成功"
+SCHEDULE_TIMEZONE = "Asia/Shanghai"
 
 
 class RuleScheduleSyncError(RuntimeError):
@@ -20,7 +21,7 @@ def valid_scheduled_rules(rules: Iterable[AlertRule]) -> list[AlertRule]:
         if rule.archived_at is not None or not rule.enabled or rule.id is None:
             continue
         try:
-            CronTrigger.from_crontab(rule.cron_expression)
+            CronTrigger.from_crontab(rule.cron_expression, timezone=SCHEDULE_TIMEZONE)
         except ValueError:
             continue
         valid_rules.append(rule)
@@ -41,7 +42,7 @@ def _rule_id_from_job_id(job_id: str) -> int | None:
 
 
 def _cron_signature(cron_expression: str) -> str:
-    return str(CronTrigger.from_crontab(cron_expression))
+    return str(CronTrigger.from_crontab(cron_expression, timezone=SCHEDULE_TIMEZONE))
 
 
 def _add_rule_job(
@@ -53,7 +54,7 @@ def _add_rule_job(
 ) -> None:
     scheduler.add_job(
         execute_rule,
-        trigger=CronTrigger.from_crontab(rule.cron_expression),
+        trigger=CronTrigger.from_crontab(rule.cron_expression, timezone=SCHEDULE_TIMEZONE),
         args=[rule.id],
         id=_job_id(rule.id),
         replace_existing=True,
@@ -117,7 +118,9 @@ class RuleScheduleSynchronizer:
                 else:
                     self.scheduler.reschedule_job(
                         _job_id(rule_id),
-                        trigger=CronTrigger.from_crontab(rule.cron_expression),
+                        trigger=CronTrigger.from_crontab(
+                            rule.cron_expression, timezone=SCHEDULE_TIMEZONE
+                        ),
                     )
             except Exception as exc:
                 failed_operations += 1
@@ -139,7 +142,7 @@ def build_scheduler(
     *,
     misfire_grace_seconds: int = 300,
 ) -> BackgroundScheduler:
-    scheduler = BackgroundScheduler(timezone="Asia/Shanghai")
+    scheduler = BackgroundScheduler(timezone=SCHEDULE_TIMEZONE)
     for rule in valid_scheduled_rules(rules):
         _add_rule_job(
             scheduler,

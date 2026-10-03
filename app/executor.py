@@ -5,9 +5,9 @@ from re import split
 from typing import Protocol
 
 from app.error_reporting import log_exception_safely, public_error_summary
-from app.mailer import EmailMessage, MailSendResult, SMTP_SEND_FAILURE, SmtpMailer
+from app.mailer import EmailMessage, MailSendResult, SMTP_PARTIAL_FAILURE, SMTP_SEND_FAILURE, SmtpMailer
 from app.models import AlertRule, ExecutionStatus, SendMode
-from app.sql_client import SqlClient
+from app.sql_client import SqlClient, odbc_sqlstate
 from app.template_renderer import render_per_row, render_summary
 
 try:
@@ -39,6 +39,7 @@ class ExecutionResult:
     error_type: str = ""
     error_message: str | None = None
     mail_results: list[ExecutionMailResult] = field(default_factory=list)
+    sqlstate: str = ""
 
     @property
     def email_count(self) -> int:
@@ -84,6 +85,7 @@ class RuleExecutor:
                 status=ExecutionStatus.FAILED,
                 error_type=type(exc).__name__,
                 error_message=public_error_summary(exc, fallback=SQL_QUERY_FAILURE),
+                sqlstate=odbc_sqlstate(exc),
             )
 
         rows = query_result.rows
@@ -167,6 +169,12 @@ class RuleExecutor:
             )
         if result.success:
             result = MailSendResult(success=True)
+        elif result.partial_success:
+            result = MailSendResult(
+                success=False,
+                error_message=SMTP_PARTIAL_FAILURE,
+                partial_success=True,
+            )
         else:
             log_exception_safely(
                 logger,
@@ -180,11 +188,15 @@ class RuleExecutor:
         successful_count = sum(1 for mail_result in mail_results if mail_result.result.success)
         if successful_count == len(mail_results):
             return ExecutionStatus.SUCCESS
-        if successful_count == 0:
+        if successful_count == 0 and not any(
+            mail_result.result.partial_success for mail_result in mail_results
+        ):
             return ExecutionStatus.FAILED
         return ExecutionStatus.PARTIAL_FAILED
 
     def _combined_error_message(self, mail_results: list[ExecutionMailResult]) -> str | None:
+        if any(mail_result.result.partial_success for mail_result in mail_results):
+            return SMTP_PARTIAL_FAILURE
         errors = [
             mail_result.result.error_message
             for mail_result in mail_results
