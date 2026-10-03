@@ -30,6 +30,7 @@ from app.models import (
     utc_now,
 )
 from app.mailer import MailSendResult
+from app.security import hash_password, verify_password
 from app.settings import Settings
 from app.sql_client import QueryResult
 from app.web_security import require_csrf
@@ -3005,6 +3006,146 @@ def test_settings_tab_switching_script_present():
 
     assert "data-settings-tab" in script
     assert "sessionStorage" in script
+
+
+CURRENT_ADMIN_PASSWORD = "current-password-1"
+NEW_ADMIN_PASSWORD = "brand-new-password-9"
+
+
+def _persist_admin(session, password=CURRENT_ADMIN_PASSWORD):
+    user = AdminUser(id=1, username="admin", password_hash=hash_password(password))
+    session.add(user)
+    session.commit()
+    session.refresh(user)
+    return user
+
+
+def test_settings_page_includes_account_security_tab(monkeypatch, session):
+    client, get_settings, app = _client_with_admin(monkeypatch, session)
+    try:
+        response = client.get("/settings")
+
+        assert response.status_code == 200
+        assert 'data-settings-tab="security"' in response.text
+        assert 'data-settings-panel="security" role="tabpanel" hidden' in response.text
+        assert 'action="/settings/password"' in response.text
+    finally:
+        app.dependency_overrides.clear()
+        get_settings.cache_clear()
+
+
+def test_change_admin_password_success_updates_hash_and_session_version(monkeypatch, session):
+    user = _persist_admin(session)
+    original_version = user.session_version
+    client, get_settings, app = _client_with_admin(monkeypatch, session)
+    try:
+        response = client.post(
+            "/settings/password",
+            data={
+                "current_password": CURRENT_ADMIN_PASSWORD,
+                "new_password": NEW_ADMIN_PASSWORD,
+                "confirm_password": NEW_ADMIN_PASSWORD,
+            },
+            follow_redirects=False,
+        )
+
+        assert response.status_code == 303
+        assert response.headers["location"] == "/settings?tab=security&changed=1"
+        session.refresh(user)
+        assert verify_password(NEW_ADMIN_PASSWORD, user.password_hash)
+        assert not verify_password(CURRENT_ADMIN_PASSWORD, user.password_hash)
+        assert user.session_version == original_version + 1
+
+        notice_response = client.get("/settings?tab=security&changed=1")
+        assert notice_response.status_code == 200
+        assert "管理员密码已更新" in notice_response.text
+    finally:
+        app.dependency_overrides.clear()
+        get_settings.cache_clear()
+
+
+@pytest.mark.parametrize(
+    ("payload", "expected_error"),
+    [
+        (
+            {
+                "current_password": "wrong-password-9",
+                "new_password": NEW_ADMIN_PASSWORD,
+                "confirm_password": NEW_ADMIN_PASSWORD,
+            },
+            "当前密码不正确",
+        ),
+        (
+            {
+                "current_password": CURRENT_ADMIN_PASSWORD,
+                "new_password": "short",
+                "confirm_password": "short",
+            },
+            "新密码长度至少 12 位",
+        ),
+        (
+            {
+                "current_password": CURRENT_ADMIN_PASSWORD,
+                "new_password": CURRENT_ADMIN_PASSWORD,
+                "confirm_password": CURRENT_ADMIN_PASSWORD,
+            },
+            "新密码不能与当前密码相同",
+        ),
+        (
+            {
+                "current_password": CURRENT_ADMIN_PASSWORD,
+                "new_password": NEW_ADMIN_PASSWORD,
+                "confirm_password": "different-password-9",
+            },
+            "两次输入的新密码不一致",
+        ),
+        (
+            {
+                "current_password": "",
+                "new_password": NEW_ADMIN_PASSWORD,
+                "confirm_password": NEW_ADMIN_PASSWORD,
+            },
+            "请填写完整的密码信息",
+        ),
+    ],
+)
+def test_change_admin_password_rejects_invalid_input(monkeypatch, session, payload, expected_error):
+    user = _persist_admin(session)
+    original_hash = user.password_hash
+    client, get_settings, app = _client_with_admin(monkeypatch, session)
+    try:
+        response = client.post("/settings/password", data=payload)
+
+        assert response.status_code == 400
+        assert expected_error in response.text
+        session.refresh(user)
+        assert user.password_hash == original_hash
+        assert user.session_version == 1
+    finally:
+        app.dependency_overrides.clear()
+        get_settings.cache_clear()
+
+
+def test_change_admin_password_rejects_unauthenticated_request(monkeypatch, session):
+    _persist_admin(session)
+    _set_required_settings(monkeypatch)
+    create_app, get_settings = _load_create_app()
+    try:
+        client = TestClient(create_app())
+        response = client.post(
+            "/settings/password",
+            data={
+                "current_password": CURRENT_ADMIN_PASSWORD,
+                "new_password": NEW_ADMIN_PASSWORD,
+                "confirm_password": NEW_ADMIN_PASSWORD,
+            },
+        )
+
+        assert response.status_code == 403
+        user = session.get(AdminUser, 1)
+        assert verify_password(CURRENT_ADMIN_PASSWORD, user.password_hash)
+    finally:
+        get_settings.cache_clear()
 
 
 def test_logs_page_uses_semantic_status_classes(monkeypatch, session):

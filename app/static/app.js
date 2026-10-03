@@ -187,7 +187,7 @@ document.addEventListener("DOMContentLoaded", () => {
   if (settingsTabButtons.length) {
     const settingsPanels = document.querySelectorAll("[data-settings-panel]");
     const tabStorageKey = "settings-tab";
-    const validTabs = ["sql", "smtp"];
+    const validTabs = ["sql", "smtp", "security"];
 
     const activateSettingsTab = (name, persist) => {
       const target = validTabs.includes(name) ? name : "sql";

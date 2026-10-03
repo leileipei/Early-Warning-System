@@ -14,7 +14,7 @@ from fastapi.templating import Jinja2Templates
 from sqlalchemy import update
 from sqlmodel import Session, select
 
-from app.auth import require_admin
+from app.auth import ADMIN_SESSION_VERSION_SESSION_KEY, require_admin
 from app.crypto import SecretCipher
 from app.dashboard import build_dashboard_context
 from app.execution_lock import RuleExecutionInProgressError
@@ -44,6 +44,7 @@ from app.models import (
     utc_now,
 )
 from app.paths import TEMPLATES_DIR
+from app.security import hash_password, verify_password
 from app.settings import get_settings
 from app.sql_validator import SqlValidationError, validate_select_only_sql
 from app.web_security import ensure_csrf_token, require_csrf
@@ -1343,11 +1344,57 @@ def settings_page(
     admin: AdminUser = Depends(require_admin),
     session: Session = Depends(get_session),
 ):
+    notice = "管理员密码已更新" if request.query_params.get("changed") == "1" else ""
     return _template_response(
         request,
         "settings.html",
-        _settings_context(request, admin, session),
+        _settings_context(request, admin, session, notice=notice),
     )
+
+
+PASSWORD_MIN_LENGTH = 12
+
+
+@router.post("/settings/password")
+def change_admin_password(
+    request: Request,
+    current_password: str = Form(""),
+    new_password: str = Form(""),
+    confirm_password: str = Form(""),
+    admin: AdminUser = Depends(require_admin),
+    session: Session = Depends(get_session),
+):
+    user = session.get(AdminUser, admin.id)
+    if user is None:
+        raise HTTPException(status_code=404, detail="管理员账号不存在")
+
+    if not current_password or not new_password or not confirm_password:
+        error = "请填写完整的密码信息"
+    elif not verify_password(current_password, user.password_hash):
+        error = "当前密码不正确"
+    elif len(new_password) < PASSWORD_MIN_LENGTH:
+        error = f"新密码长度至少 {PASSWORD_MIN_LENGTH} 位"
+    elif new_password == current_password:
+        error = "新密码不能与当前密码相同"
+    elif new_password != confirm_password:
+        error = "两次输入的新密码不一致"
+    else:
+        error = ""
+
+    if error:
+        return _template_response(
+            request,
+            "settings.html",
+            _settings_context(request, admin, session, error=error),
+            status_code=400,
+        )
+
+    user.password_hash = hash_password(new_password)
+    user.session_version += 1
+    session.add(user)
+    session.commit()
+    request.session[ADMIN_SESSION_VERSION_SESSION_KEY] = user.session_version
+    return RedirectResponse("/settings?tab=security&changed=1", status_code=303)
 
 
 @router.post("/settings/sql-server")
