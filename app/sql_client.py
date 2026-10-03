@@ -1,11 +1,25 @@
 import logging
+import re
 from dataclasses import dataclass
 from typing import Protocol
 
 from app.error_reporting import log_exception_safely
+from app.sql_validator import validate_select_sql
 
 
 logger = logging.getLogger(__name__)
+
+
+def odbc_sqlstate(exc: Exception) -> str:
+    try:
+        import pyodbc
+    except ImportError:
+        return ""
+
+    if not isinstance(exc, pyodbc.Error) or not exc.args:
+        return ""
+    state = exc.args[0]
+    return state if isinstance(state, str) and re.fullmatch(r"[A-Z0-9]{5}", state) else ""
 
 
 @dataclass(frozen=True)
@@ -85,6 +99,7 @@ class PyodbcSqlServerClient:
     def query(self, sql: str, timeout_seconds: int, max_rows: int) -> QueryResult:
         if type(max_rows) is not int or max_rows < 1:
             raise ValueError("max_rows must be a positive integer")
+        validate_select_sql(sql)
 
         try:
             import pyodbc
@@ -105,6 +120,7 @@ class PyodbcSqlServerClient:
             raise
 
     def validate_syntax(self, sql: str, timeout_seconds: int) -> None:
+        validate_select_sql(sql)
         try:
             import pyodbc
         except ModuleNotFoundError as exc:

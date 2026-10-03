@@ -62,12 +62,12 @@ def build_dashboard_context(session: Session, *, now: datetime | None = None) ->
         .limit(5)
     ).all()
 
-    def mail_count(status: MailStatus) -> int:
+    def mail_count(*statuses: MailStatus) -> int:
         return session.exec(
             select(func.count()).select_from(MailLog).where(
                 MailLog.sent_at >= recent_start,
                 MailLog.sent_at <= current,
-                MailLog.status == status,
+                MailLog.status.in_(statuses),
             )
         ).one()
 
@@ -79,5 +79,5 @@ def build_dashboard_context(session: Session, *, now: datetime | None = None) ->
             {"log": log, "rule_name": rule_name} for log, rule_name in recent_rows
         ],
         "mail_success_count": mail_count(MailStatus.SUCCESS),
-        "mail_failure_count": mail_count(MailStatus.FAILED),
+        "mail_failure_count": mail_count(MailStatus.FAILED, MailStatus.PARTIAL_FAILED),
     }
