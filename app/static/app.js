@@ -182,6 +182,58 @@ document.addEventListener("DOMContentLoaded", () => {
     });
   }
 
+  /* ============ 配置页页签 ============ */
+  const settingsTabButtons = document.querySelectorAll("[data-settings-tab]");
+  if (settingsTabButtons.length) {
+    const settingsPanels = document.querySelectorAll("[data-settings-panel]");
+    const tabStorageKey = "settings-tab";
+    const validTabs = ["sql", "smtp"];
+
+    const activateSettingsTab = (name, persist) => {
+      const target = validTabs.includes(name) ? name : "sql";
+      settingsTabButtons.forEach((button) => {
+        const isActive = button.dataset.settingsTab === target;
+        button.classList.toggle("is-active", isActive);
+        button.setAttribute("aria-selected", String(isActive));
+      });
+      settingsPanels.forEach((panel) => {
+        panel.hidden = panel.dataset.settingsPanel !== target;
+      });
+      if (persist) {
+        try {
+          window.sessionStorage.setItem(tabStorageKey, target);
+        } catch (_error) {
+          /* 无法持久化时仅切换当前页 */
+        }
+      }
+    };
+
+    settingsTabButtons.forEach((button) => {
+      button.addEventListener("click", () => activateSettingsTab(button.dataset.settingsTab, true));
+    });
+    /* 表单提交前记住所在页签，提交重定向回来后恢复 */
+    settingsPanels.forEach((panel) => {
+      panel.querySelectorAll("form").forEach((form) => {
+        form.addEventListener("submit", () => {
+          try {
+            window.sessionStorage.setItem(tabStorageKey, panel.dataset.settingsPanel);
+          } catch (_error) {
+            /* 无法持久化时保持默认页签 */
+          }
+        });
+      });
+    });
+
+    let initialTab = null;
+    try {
+      initialTab = window.sessionStorage.getItem(tabStorageKey);
+    } catch (_error) {
+      initialTab = null;
+    }
+    const tabParam = new URLSearchParams(window.location.search).get("tab");
+    activateSettingsTab(tabParam || initialTab || "sql", false);
+  }
+
   /* ============ 成功提示自动消退 ============ */
   document.querySelectorAll(".form-success").forEach((notice) => {
     window.setTimeout(() => {

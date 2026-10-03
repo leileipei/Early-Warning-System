@@ -2984,6 +2984,29 @@ def test_base_template_loads_theme_script_before_stylesheet():
     assert template.index("/static/theme.js") < template.index("/static/styles.css")
 
 
+def test_settings_page_uses_tabs_for_config_sections(monkeypatch, session):
+    client, get_settings, app = _client_with_admin(monkeypatch, session)
+    try:
+        response = client.get("/settings")
+
+        assert response.status_code == 200
+        assert 'role="tablist"' in response.text
+        assert 'data-settings-tab="sql"' in response.text
+        assert 'data-settings-tab="smtp"' in response.text
+        assert 'data-settings-panel="sql"' in response.text
+        assert 'data-settings-panel="smtp" role="tabpanel" hidden' in response.text
+    finally:
+        app.dependency_overrides.clear()
+        get_settings.cache_clear()
+
+
+def test_settings_tab_switching_script_present():
+    script = Path("app/static/app.js").read_text(encoding="utf-8")
+
+    assert "data-settings-tab" in script
+    assert "sessionStorage" in script
+
+
 def test_logs_page_uses_semantic_status_classes(monkeypatch, session):
     data_source = _create_data_source(session)
     rule = _create_rule(session, data_source)

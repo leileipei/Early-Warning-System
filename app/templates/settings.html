@@ -19,9 +19,13 @@
 {% set sql_form = sql_form or {} %}
 {% set smtp_form = smtp_form or {} %}
 
-<section class="two-column">
-  <article class="panel">
-    <h2>SQL Server</h2>
+<div class="tabs" role="tablist" aria-label="配置分类">
+  <button class="tab is-active" type="button" role="tab" data-settings-tab="sql" aria-selected="true">SQL Server 数据源</button>
+  <button class="tab" type="button" role="tab" data-settings-tab="smtp" aria-selected="false">SMTP 邮件服务</button>
+</div>
+
+<section class="panel" data-settings-panel="sql" role="tabpanel">
+  <h2>SQL Server</h2>
     <form class="stacked-form" method="post" action="/settings/sql-server">
       <section class="form-section">
         {{ csrf_input(csrf_token) }}
@@ -140,9 +144,9 @@
         </tbody>
       </table>
     </div>
-  </article>
-  <article class="panel">
-    <h2>SMTP</h2>
+</section>
+<section class="panel" data-settings-panel="smtp" role="tabpanel" hidden>
+  <h2>SMTP</h2>
     <form class="stacked-form" method="post" action="/settings/smtp">
       <section class="form-section">
         {{ csrf_input(csrf_token) }}
@@ -233,6 +237,5 @@
         </tbody>
       </table>
     </div>
-  </article>
 </section>
 {% endblock %}
