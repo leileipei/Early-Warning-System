@@ -701,3 +701,89 @@ def test_utc_now_returns_naive_utc_datetime():
     timestamp = utc_now()
 
     assert timestamp.tzinfo is None
+
+
+def test_migration_defaults_trust_server_certificate_to_no():
+    from app.db import create_db_engine, migrate_sqlite_schema
+
+    engine = create_db_engine("sqlite://")
+    with engine.begin() as connection:
+        connection.exec_driver_sql(
+            "CREATE TABLE sqldatasource ("
+            "id INTEGER PRIMARY KEY, "
+            "name VARCHAR NOT NULL, "
+            "host VARCHAR NOT NULL, "
+            "port INTEGER NOT NULL, "
+            "database VARCHAR NOT NULL, "
+            "username VARCHAR NOT NULL, "
+            "encrypted_password VARCHAR NOT NULL, "
+            "enabled BOOLEAN NOT NULL, "
+            "connect_timeout_seconds INTEGER NOT NULL, "
+            "created_at DATETIME NOT NULL, "
+            "updated_at DATETIME NOT NULL)"
+        )
+    migrate_sqlite_schema(engine)
+    with engine.begin() as connection:
+        connection.exec_driver_sql(
+            "INSERT INTO sqldatasource "
+            "(name, host, port, database, username, encrypted_password, enabled, "
+            "connect_timeout_seconds, created_at, updated_at) "
+            "VALUES ('legacy', 'db.example.com', 1433, 'erp', 'readonly', 'encrypted', 1, 10, "
+            "'2026-01-01 00:00:00', '2026-01-01 00:00:00')"
+        )
+        value = connection.exec_driver_sql(
+            "SELECT trust_server_certificate FROM sqldatasource WHERE name = 'legacy'"
+        ).scalar()
+
+    assert value == "no"
+    engine.dispose()
+
+
+def test_migration_dedupes_suppression_rows_and_adds_unique_index():
+    from app.db import create_db_engine, migrate_sqlite_schema
+
+    engine = create_db_engine("sqlite://")
+    with engine.begin() as connection:
+        connection.exec_driver_sql(
+            "CREATE TABLE alertsuppression ("
+            "id INTEGER PRIMARY KEY, "
+            "rule_id INTEGER NOT NULL, "
+            "suppression_key VARCHAR NOT NULL, "
+            "first_seen_at DATETIME NOT NULL, "
+            "last_seen_at DATETIME NOT NULL, "
+            "hit_count INTEGER NOT NULL)"
+        )
+        connection.exec_driver_sql(
+            "INSERT INTO alertsuppression "
+            "(rule_id, suppression_key, first_seen_at, last_seen_at, hit_count) VALUES "
+            "(1, 'order-1', '2026-01-01 00:00:00', '2026-01-01 01:00:00', 1), "
+            "(1, 'order-1', '2026-01-01 00:00:00', '2026-01-02 01:00:00', 5)"
+        )
+    migrate_sqlite_schema(engine)
+
+    with engine.connect() as connection:
+        row = connection.exec_driver_sql(
+            "SELECT COUNT(*), MAX(hit_count) FROM alertsuppression"
+        ).first()
+        indexes = inspect(engine).get_indexes("alertsuppression")
+
+    assert row == (1, 5)
+    unique_indexes = {index["name"] for index in indexes if index["unique"]}
+    assert "uq_alertsuppression_rule_key" in unique_indexes
+    engine.dispose()
+
+
+def test_fresh_schema_enforces_suppression_unique_constraint(session):
+    rule = _create_rule(session)
+    now = utc_now()
+    session.add(
+        AlertSuppression(rule_id=rule.id, suppression_key="order-1", first_seen_at=now, last_seen_at=now)
+    )
+    session.commit()
+
+    session.add(
+        AlertSuppression(rule_id=rule.id, suppression_key="order-1", first_seen_at=now, last_seen_at=now)
+    )
+    with pytest.raises(IntegrityError):
+        session.commit()
+    session.rollback()

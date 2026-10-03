@@ -156,7 +156,6 @@ def _execute_rule_once(
         )
         result = executor.execute(
             rule,
-            trigger_type=trigger_type,
             row_filter=suppression_filter,
         )
     except ConfigurationError as exc:

@@ -10,10 +10,7 @@ from app.models import AlertRule, ExecutionStatus, SendMode
 from app.sql_client import SqlClient, odbc_sqlstate
 from app.template_renderer import render_per_row, render_summary
 
-try:
-    from app.sql_validator import validate_select_only_sql
-except ImportError:
-    from app.sql_validator import validate_select_sql as validate_select_only_sql
+from app.sql_validator import validate_select_only_sql
 
 
 logger = logging.getLogger(__name__)
@@ -60,10 +57,9 @@ class RuleExecutor:
     def execute(
         self,
         rule: AlertRule,
-        trigger_type=None,
         row_filter: Callable[[list[dict]], list[dict]] | None = None,
     ) -> ExecutionResult:
-        sql = _rule_sql(rule)
+        sql = rule.sql_text
         try:
             validate_select_only_sql(sql)
         except Exception as exc:
@@ -77,7 +73,7 @@ class RuleExecutor:
             query_result = self.sql_client.query(
                 sql,
                 timeout_seconds=rule.query_timeout_seconds,
-                max_rows=_rule_max_rows(rule, self.max_rows),
+                max_rows=rule.max_rows,
             )
         except Exception as exc:
             log_exception_safely(logger, "Rule SQL query failed: operation=rule_sql_query", exc)
@@ -216,14 +212,6 @@ def _row_recipients(row: dict, field_name: str) -> list[str]:
     if value is None:
         return []
     return _parse_recipients(str(value))
-
-
-def _rule_sql(rule: AlertRule) -> str:
-    return getattr(rule, "sql_query", rule.sql_text)
-
-
-def _rule_max_rows(rule: AlertRule, fallback: int) -> int:
-    return getattr(rule, "max_rows", fallback)
 
 
 def _exception_message(exc: Exception) -> str:

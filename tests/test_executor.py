@@ -597,19 +597,6 @@ def test_recipients_and_cc_are_parsed_for_messages():
     assert mailer.messages[0].cc_recipients == ["lead@example.com", "finance@example.com"]
 
 
-@pytest.mark.parametrize("legacy_trigger_arg", [None, object()])
-def test_execute_accepts_optional_legacy_trigger_argument(legacy_trigger_arg):
-    mailer = FakeMailer()
-    executor = RuleExecutor(sql_client=FakeSqlClient([]), mailer=mailer)
-
-    if legacy_trigger_arg is None:
-        result = executor.execute(make_rule())
-    else:
-        result = executor.execute(make_rule(), legacy_trigger_arg)
-
-    assert result.status == ExecutionStatus.SUCCESS
-
-
 def test_execute_rule_by_id_persists_failed_execution_when_sql_client_fails(monkeypatch, session):
     data_source = persist_data_source(session)
     persist_smtp_config(session)

@@ -2,6 +2,7 @@ from datetime import UTC, datetime
 from enum import StrEnum
 from typing import Optional
 
+from sqlalchemy import UniqueConstraint
 from sqlmodel import Field, SQLModel
 
 
@@ -121,6 +122,10 @@ class AlertSuppression(SQLModel, table=True):
     first_seen_at: datetime = Field(default_factory=utc_now)
     last_seen_at: datetime = Field(default_factory=utc_now)
     hit_count: int = 1
+
+    __table_args__ = (
+        UniqueConstraint("rule_id", "suppression_key", name="uq_alertsuppression_rule_key"),
+    )
 
 
 class AlertRuleVersion(SQLModel, table=True):

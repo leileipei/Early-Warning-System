@@ -113,7 +113,7 @@ def _migrate_sqlite_schema(connection: Connection) -> None:
             "odbc_driver": "VARCHAR NOT NULL DEFAULT 'ODBC Driver 18 for SQL Server'",
             "server_override": "VARCHAR NOT NULL DEFAULT ''",
             "encrypt": "VARCHAR NOT NULL DEFAULT 'yes'",
-            "trust_server_certificate": "VARCHAR NOT NULL DEFAULT 'yes'",
+            "trust_server_certificate": "VARCHAR NOT NULL DEFAULT 'no'",
             "extra_params": "VARCHAR NOT NULL DEFAULT ''",
         }
         for column_name, ddl in columns_to_add.items():
@@ -172,6 +172,17 @@ def _migrate_sqlite_schema(connection: Connection) -> None:
     if {"executionlog", "maillog"} <= table_names:
         for statement in _LOG_INDEX_STATEMENTS:
             connection.exec_driver_sql(statement)
+
+    if "alertsuppression" in table_names:
+        connection.exec_driver_sql(
+            "DELETE FROM alertsuppression WHERE id NOT IN ("
+            "SELECT MAX(id) FROM alertsuppression GROUP BY rule_id, suppression_key"
+            ")"
+        )
+        connection.exec_driver_sql(
+            "CREATE UNIQUE INDEX IF NOT EXISTS uq_alertsuppression_rule_key "
+            "ON alertsuppression (rule_id, suppression_key)"
+        )
 
 
 def get_session() -> Generator[Session, None, None]:
