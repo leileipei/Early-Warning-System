@@ -86,6 +86,13 @@ def create_app() -> FastAPI:
     app.include_router(auth_router)
     app.include_router(page_router)
 
+    @app.middleware("http")
+    async def no_cache_static_assets(request: Request, call_next):
+        response = await call_next(request)
+        if request.url.path.startswith("/static/"):
+            response.headers["Cache-Control"] = "no-cache"
+        return response
+
     @app.exception_handler(HTTPException)
     async def handle_http_exception(request: Request, exc: HTTPException):
         accepts_html = _prefers_html(request.headers.get("accept", ""))

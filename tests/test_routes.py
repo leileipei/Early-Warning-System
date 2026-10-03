@@ -3618,6 +3618,20 @@ def test_static_stylesheet_is_mounted(monkeypatch):
         get_settings.cache_clear()
 
 
+def test_static_assets_send_no_cache_header(monkeypatch):
+    _set_required_settings(monkeypatch)
+    create_app, get_settings = _load_create_app()
+    try:
+        client = TestClient(create_app())
+
+        response = client.get("/static/app.js")
+
+        assert response.status_code == 200
+        assert response.headers["cache-control"] == "no-cache"
+    finally:
+        get_settings.cache_clear()
+
+
 def test_static_stylesheet_is_mounted_from_other_cwd(tmp_path, monkeypatch):
     _set_required_settings(monkeypatch)
     monkeypatch.chdir(tmp_path)
