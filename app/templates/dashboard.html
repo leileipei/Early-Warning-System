@@ -1,25 +1,52 @@
 {% extends "base.html" %}
 
+{% set status_meta = {
+  "success": ("成功", "badge-success"),
+  "running": ("运行中", "badge-warning"),
+  "failed": ("失败", "badge-danger"),
+  "partial_failed": ("部分失败", "badge-danger"),
+} %}
+{% set trigger_meta = {"scheduled": "定时调度", "manual": "手动执行"} %}
+
 {% block content %}
 <section class="page-header">
   <div class="page-heading">
     <p class="eyebrow">后台</p>
     <h1>仪表盘</h1>
   </div>
+  <div class="page-actions">
+    <a class="button button-secondary" href="/logs">查看日志</a>
+    <a class="button" href="/rules/new">新建规则</a>
+  </div>
 </section>
 
 <section class="metric-grid" aria-label="运行概览">
   <article class="panel metric-card">
-    <span class="metric-label status-text">启用规则</span>
-    <strong class="metric-value" data-testid="enabled-rule-count">{{ enabled_rule_count }}</strong>
+    <span class="metric-icon">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.7 21a2 2 0 0 1-3.4 0"/></svg>
+    </span>
+    <div>
+      <span class="metric-label">启用规则</span>
+      <strong class="metric-value" data-testid="enabled-rule-count">{{ enabled_rule_count }}</strong>
+    </div>
   </article>
   <article class="panel metric-card">
-    <span class="metric-label status-text">今日执行</span>
-    <strong class="metric-value" data-testid="today-execution-count">{{ today_execution_count }}</strong>
+    <span class="metric-icon">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+    </span>
+    <div>
+      <span class="metric-label">今日执行（上海时间）</span>
+      <strong class="metric-value" data-testid="today-execution-count">{{ today_execution_count }}</strong>
+    </div>
   </article>
   <article class="panel metric-card">
-    <span class="metric-label status-text">近 24 小时失败</span>
-    <strong class="metric-value" data-testid="recent-failure-count">{{ recent_failure_count }}</strong>
+    <span class="metric-icon">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg>
+    </span>
+    <div>
+      <span class="metric-label">近 24 小时失败</span>
+      <strong class="metric-value" data-testid="recent-failure-count">{{ recent_failure_count }}</strong>
+    </div>
   </article>
 </section>
 
@@ -41,15 +68,12 @@
         </thead>
         <tbody>
           {% for item in recent_executions %}
+          {% set status = status_meta.get(item.log.status.value, ("未知", "badge-muted")) %}
           <tr>
-            <td>{{ item.rule_name }}</td>
+            <td><a class="text-link" href="/rules/{{ item.log.rule_id }}/edit">{{ item.rule_name }}</a></td>
             <td>{{ item.log.started_at.strftime("%Y-%m-%d %H:%M:%S") }}</td>
-            <td>{{ item.log.trigger_type.value }}</td>
-            <td>
-              <span class="status-text {% if item.log.status.value == 'success' %}status-success{% elif item.log.status.value == 'running' %}status-warning{% else %}status-danger{% endif %}">
-                {{ item.log.status.value }}
-              </span>
-            </td>
+            <td>{{ trigger_meta.get(item.log.trigger_type.value, item.log.trigger_type.value) }}</td>
+            <td><span class="badge {{ status[1] }}">{{ status[0] }}</span></td>
             <td>{{ item.log.row_count }}</td>
             <td>{{ item.log.email_count }}</td>
           </tr>
@@ -58,34 +82,31 @@
       </table>
     </div>
     {% else %}
-    <p class="empty-state">暂无执行记录</p>
+    <div class="empty-state">
+      <svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="22 12 16 12 14 15 10 15 8 12 2 12"/><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/></svg>
+      <p>暂无执行记录</p>
+      <a class="button button-secondary button-sm" href="/rules">管理规则</a>
+    </div>
     {% endif %}
   </article>
-  <article class="panel table-panel">
+  <article class="panel">
     <h2 class="section-heading">近 24 小时邮件</h2>
     {% if mail_success_count or mail_failure_count %}
-    <div class="table-shell">
-      <table>
-        <thead>
-          <tr>
-            <th>状态</th>
-            <th>数量</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr>
-            <td><span class="status-text status-success">成功</span></td>
-            <td data-testid="mail-success-count">{{ mail_success_count }}</td>
-          </tr>
-          <tr>
-            <td><span class="status-text status-danger">失败</span></td>
-            <td data-testid="mail-failure-count">{{ mail_failure_count }}</td>
-          </tr>
-        </tbody>
-      </table>
+    <div class="stat-rows">
+      <div class="stat-row">
+        <span class="stat-label"><i class="dot dot-success"></i>发送成功</span>
+        <strong data-testid="mail-success-count">{{ mail_success_count }}</strong>
+      </div>
+      <div class="stat-row">
+        <span class="stat-label"><i class="dot dot-danger"></i>失败（含部分失败）</span>
+        <strong data-testid="mail-failure-count">{{ mail_failure_count }}</strong>
+      </div>
     </div>
     {% else %}
-    <p class="empty-state">暂无邮件日志</p>
+    <div class="empty-state">
+      <svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7"/></svg>
+      <p>暂无邮件日志</p>
+    </div>
     {% endif %}
   </article>
 </section>

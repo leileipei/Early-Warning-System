@@ -11,7 +11,7 @@ from app.crypto import SecretCipher
 from app.error_reporting import log_exception_safely, public_error_summary
 from app.execution_lock import rule_execution_lease
 from app.executor import ExecutionResult, RuleExecutor
-from app.mailer import SMTP_SEND_FAILURE, SmtpMailer
+from app.mailer import SMTP_PARTIAL_FAILURE, SMTP_SEND_FAILURE, SmtpMailer
 from app.models import (
     AlertRule,
     AlertSuppression,
@@ -251,6 +251,8 @@ def _persist_suppression_state(session: Session, rule: AlertRule, state: dict) -
 def _is_retryable_result(result: ExecutionResult) -> bool:
     if result.status != ExecutionStatus.FAILED:
         return False
+    if result.sqlstate:
+        return result.sqlstate.startswith("08") or result.sqlstate in {"40001", "HYT00", "HYT01"}
     return result.error_type in {
         "ConnectionError",
         "MailSendError",
@@ -318,13 +320,22 @@ def _build_execution_log(
 
 
 def _build_mail_log(execution_log_id: int, mail_result) -> MailLog:
+    if mail_result.result.success:
+        status = MailStatus.SUCCESS
+        error_message = ""
+    elif mail_result.result.partial_success:
+        status = MailStatus.PARTIAL_FAILED
+        error_message = SMTP_PARTIAL_FAILURE
+    else:
+        status = MailStatus.FAILED
+        error_message = SMTP_SEND_FAILURE
     return MailLog(
         execution_log_id=execution_log_id,
         recipients=",".join(mail_result.message.recipients),
         cc_recipients=",".join(mail_result.message.cc_recipients),
         subject=mail_result.message.subject,
-        status=MailStatus.SUCCESS if mail_result.result.success else MailStatus.FAILED,
-        error_message="" if mail_result.result.success else SMTP_SEND_FAILURE,
+        status=status,
+        error_message=error_message,
     )
 
 

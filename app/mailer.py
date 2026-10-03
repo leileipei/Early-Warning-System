@@ -8,6 +8,7 @@ from app.error_reporting import log_exception_safely, public_error_summary
 
 logger = logging.getLogger(__name__)
 SMTP_SEND_FAILURE = "SMTP 发送失败，请检查服务器、端口、加密方式和账号配置"
+SMTP_PARTIAL_FAILURE = "SMTP 部分收件人被拒收，请检查邮箱地址及服务器策略"
 
 
 @dataclass(frozen=True)
@@ -22,6 +23,7 @@ class EmailMessage:
 class MailSendResult:
     success: bool
     error_message: str = ""
+    partial_success: bool = False
 
 
 class SmtpMailer:
@@ -43,7 +45,19 @@ class SmtpMailer:
         client = None
         try:
             client = self.client_factory()
-            client.sendmail(self.sender, all_recipients, mime.as_string())
+            refused = client.sendmail(self.sender, all_recipients, mime.as_string())
+            if refused:
+                partial_success = any(address not in refused for address in all_recipients)
+                logger.warning(
+                    "SMTP recipients refused: refused_count=%d; partial_success=%s",
+                    len(refused),
+                    partial_success,
+                )
+                return MailSendResult(
+                    success=False,
+                    error_message=SMTP_PARTIAL_FAILURE if partial_success else SMTP_SEND_FAILURE,
+                    partial_success=partial_success,
+                )
             return MailSendResult(success=True)
         except Exception as exc:
             log_exception_safely(logger, "SMTP send failed: operation=smtp_send", exc)

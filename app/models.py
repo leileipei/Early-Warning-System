@@ -29,6 +29,7 @@ class TriggerType(StrEnum):
 class MailStatus(StrEnum):
     SUCCESS = "success"
     FAILED = "failed"
+    PARTIAL_FAILED = "partial_failed"
 
 
 class AdminUser(SQLModel, table=True):
