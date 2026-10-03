@@ -3,7 +3,7 @@
 
 {% block content %}
 <section class="page-header">
-  <div>
+  <div class="page-heading">
     <p class="eyebrow">规则</p>
     <h1>{{ heading }}</h1>
   </div>
@@ -17,6 +17,12 @@
   <form class="stacked-form" method="post" action="{{ action }}">
     <section class="form-section">
       {{ csrf_input(csrf_token) }}
+      <div class="section-heading">
+        <div>
+          <h2>基本信息</h2>
+          <p class="section-description">规则名称与要查询的数据源。</p>
+        </div>
+      </div>
       <label>
         <span>规则名称</span>
         <input name="name" value="{{ form.get('name', '') }}" placeholder="例如：库存低水位预警" required>
@@ -37,7 +43,7 @@
       <div class="section-heading">
         <div>
           <h2>SQL 查询</h2>
-          <p class="section-description">仅允许只读 SELECT 或 WITH 查询。</p>
+          <p class="section-description">仅允许只读 SELECT 或 WITH 查询，可用「检测 SQL」校验语法、「预览结果」试跑前 5 行。</p>
         </div>
       </div>
       <label>
@@ -52,6 +58,12 @@
       <div class="preview-panel" data-sql-preview-result aria-live="polite"></div>
     </section>
     <section class="form-section">
+      <div class="section-heading">
+        <div>
+          <h2>调度与收件人</h2>
+          <p class="section-description">Cron 表达式按服务器时区（Asia/Shanghai）解析。</p>
+        </div>
+      </div>
       <div class="form-row">
         <label>
           <span>Cron 表达式</span>
@@ -78,6 +90,12 @@
       </div>
     </section>
     <section class="form-section">
+      <div class="section-heading">
+        <div>
+          <h2>邮件内容</h2>
+          <p class="section-description">主题和正文支持 Jinja 变量；汇总模式可用 {{ "{{table}}" }} 插入结果表格。</p>
+        </div>
+      </div>
       <label>
         <span>邮件主题</span>
         <input name="subject_template" value="{{ form.get('subject_template', '') }}" required>
@@ -105,6 +123,12 @@
       </div>
     </section>
     <section class="form-section">
+      <div class="section-heading">
+        <div>
+          <h2>高级选项</h2>
+          <p class="section-description">重复预警抑制用于在窗口期内对相同键的告警去重。</p>
+        </div>
+      </div>
       <div class="form-row">
         <label>
           <span>重复预警抑制</span>

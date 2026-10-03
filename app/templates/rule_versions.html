@@ -34,9 +34,9 @@
           <td>{{ row.version.changed_by }}</td>
           <td>{{ row.version.changed_at }}</td>
           <td>{{ row.snapshot.get('name', '') }}</td>
-          <td>{{ row.snapshot.get('cron_expression', '') }}</td>
+          <td><code>{{ row.snapshot.get('cron_expression', '') }}</code></td>
           <td>{{ row.snapshot.get('recipients', '') }}</td>
-          <td><code>{{ row.snapshot.get('sql_text', '') }}</code></td>
+          <td class="cell-ellipsis" title="{{ row.snapshot.get('sql_text', '') }}"><code>{{ row.snapshot.get('sql_text', '') }}</code></td>
         </tr>
         <tr>
           <td></td>

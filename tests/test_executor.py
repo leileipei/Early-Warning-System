@@ -4,6 +4,7 @@ from threading import Barrier, Event, Lock
 from types import SimpleNamespace
 
 import pytest
+import pyodbc
 from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, select
@@ -11,7 +12,7 @@ from sqlmodel import Session, select
 import app.execution_service as execution_service
 from app.execution_lock import RuleExecutionInProgressError, rule_execution_lease
 from app.executor import RuleExecutor
-from app.mailer import MailSendResult
+from app.mailer import MailSendResult, SmtpMailer
 from app.models import (
     AlertRule,
     AlertSuppression,
@@ -798,6 +799,85 @@ def test_execute_rule_by_id_retries_transient_sql_failure_then_persists_success(
     assert session.exec(select(MailLog)).one().status == MailStatus.SUCCESS
 
 
+@pytest.mark.parametrize(
+    ("error_class", "state"),
+    [
+        (pyodbc.OperationalError, "08S01"),
+        (pyodbc.InterfaceError, "08001"),
+        (pyodbc.OperationalError, "08006"),
+        (pyodbc.OperationalError, "HYT00"),
+        (pyodbc.OperationalError, "HYT01"),
+        (pyodbc.OperationalError, "40001"),
+    ],
+)
+def test_execute_rule_by_id_retries_odbc_sqlstates_then_logs_one_success(
+    monkeypatch, session, error_class, state
+):
+    data_source = persist_data_source(session)
+    persist_smtp_config(session)
+    rule = persist_rule(session, data_source)
+    sql_client = SequenceSqlClient([
+        error_class(state, "PWD=database-secret"), [{"id": 1, "amount": 100}]
+    ])
+    mailer = FakeMailer()
+    monkeypatch.setattr(execution_service, "build_sql_client", lambda source: sql_client)
+    monkeypatch.setattr(execution_service, "build_smtp_mailer", lambda config: mailer)
+
+    log = execution_service.execute_rule_by_id(session, rule.id, retry_delay_seconds=0)
+
+    assert log.status == ExecutionStatus.SUCCESS
+    assert len(sql_client.calls) == 2
+    assert len(mailer.messages) == 1
+    assert session.exec(select(ExecutionLog)).all() == [log]
+    assert len(session.exec(select(MailLog)).all()) == 1
+
+
+@pytest.mark.parametrize("state", ["42000", "28000", "IM002", "HY000", "invalid"])
+def test_execute_rule_by_id_does_not_retry_deterministic_or_unknown_odbc_errors(
+    monkeypatch, session, state
+):
+    data_source = persist_data_source(session)
+    persist_smtp_config(session)
+    rule = persist_rule(session, data_source)
+    sql_client = FakeSqlClient(error=pyodbc.OperationalError(state, "PWD=database-secret"))
+    mailer = FakeMailer()
+    monkeypatch.setattr(execution_service, "build_sql_client", lambda source: sql_client)
+    monkeypatch.setattr(execution_service, "build_smtp_mailer", lambda config: mailer)
+
+    log = execution_service.execute_rule_by_id(session, rule.id, retry_delay_seconds=0)
+
+    assert log.status == ExecutionStatus.FAILED
+    assert log.error_type == "OperationalError"
+    assert len(sql_client.calls) == 1
+    assert mailer.messages == []
+    assert "database-secret" not in log.error_message
+    assert "已重试" not in log.error_message
+
+
+def test_execute_rule_by_id_records_one_odbc_failure_after_three_attempts(
+    monkeypatch, session, caplog
+):
+    source = persist_data_source(session)
+    persist_smtp_config(session)
+    rule = persist_rule(session, source)
+    sql_client = FakeSqlClient(error=pyodbc.OperationalError("08S01", "PWD=database-secret"))
+    mailer = FakeMailer()
+    monkeypatch.setattr(execution_service, "build_sql_client", lambda source: sql_client)
+    monkeypatch.setattr(execution_service, "build_smtp_mailer", lambda config: mailer)
+
+    log = execution_service.execute_rule_by_id(session, rule.id, retry_delay_seconds=0)
+
+    assert log.status == ExecutionStatus.FAILED
+    assert log.error_type == "OperationalError"
+    assert len(sql_client.calls) == 3
+    assert "已重试 2 次" in log.error_message
+    assert session.exec(select(ExecutionLog)).all() == [log]
+    assert session.exec(select(MailLog)).all() == []
+    assert mailer.messages == []
+    assert "database-secret" not in log.error_message
+    assert "database-secret" not in caplog.text
+
+
 def test_execute_rule_by_id_persists_one_log_after_exhausting_retries(monkeypatch, session):
     data_source = persist_data_source(session)
     persist_smtp_config(session)
@@ -859,6 +939,62 @@ def test_execute_rule_by_id_persists_partial_mail_results(monkeypatch, session):
     assert mail_logs[0].recipients == "ops@example.com"
     assert mail_logs[1].error_message == "SMTP 发送失败，请检查服务器、端口、加密方式和账号配置"
     assert len(mail_logs) == 2
+
+
+@pytest.mark.parametrize("rejected_address", ["ops@example.com", "audit@example.com"])
+def test_execute_rule_by_id_records_partial_recipient_failure_without_retry_or_suppression(
+    monkeypatch, session, rejected_address, caplog
+):
+    class PartialSmtpClient:
+        def __init__(self):
+            self.send_count = 0
+
+        def sendmail(self, sender, recipients, body):
+            self.send_count += 1
+            return {rejected_address: (550, b"SMTP_PASSWORD=smtp-secret")}
+
+        def quit(self):
+            pass
+
+    data_source = persist_data_source(session)
+    persist_smtp_config(session)
+    rule = persist_rule(
+        session,
+        data_source,
+        recipients="ops@example.com,lead@example.com",
+        cc_recipients="audit@example.com",
+        suppress_duplicates=True,
+        suppression_key_field="id",
+    )
+    client = PartialSmtpClient()
+    sql_client = FakeSqlClient([{"id": 1, "amount": 100}])
+    monkeypatch.setattr(execution_service, "build_sql_client", lambda source: sql_client)
+    monkeypatch.setattr(
+        execution_service,
+        "build_smtp_mailer",
+        lambda config: SmtpMailer("alerts@example.com", lambda: client),
+    )
+
+    log_id = execution_service.execute_rule_by_id(
+        session, rule.id, retry_delay_seconds=0
+    ).id
+    session.expire_all()
+    execution_log = session.get(ExecutionLog, log_id)
+    mail_log = session.exec(select(MailLog)).one()
+
+    assert execution_log.status == ExecutionStatus.PARTIAL_FAILED
+    assert execution_log.email_count == 0
+    assert execution_log.error_type == "MailSendError"
+    assert mail_log.status.value == "partial_failed"
+    assert mail_log.recipients == "ops@example.com,lead@example.com"
+    assert mail_log.cc_recipients == "audit@example.com"
+    assert mail_log.error_message == "SMTP 部分收件人被拒收，请检查邮箱地址及服务器策略"
+    assert execution_log.error_message == mail_log.error_message
+    assert client.send_count == 1
+    assert len(sql_client.calls) == 1
+    assert len(session.exec(select(ExecutionLog)).all()) == 1
+    assert session.exec(select(AlertSuppression)).all() == []
+    assert "smtp-secret" not in caplog.text
 
 
 def test_execute_rule_by_id_records_suppression_keys_after_success(monkeypatch, session):
