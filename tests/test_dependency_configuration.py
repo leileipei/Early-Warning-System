@@ -29,6 +29,44 @@ def _pinned_version(requirement: Requirement) -> Version:
     return Version(version)
 
 
+def test_cryptography_constraints_exclude_known_vulnerable_releases():
+    with (ROOT / "pyproject.toml").open("rb") as file:
+        project = tomllib.load(file)
+    cryptography = next(
+        requirement
+        for entry in project["project"]["dependencies"]
+        if canonicalize_name((requirement := Requirement(entry)).name) == "cryptography"
+    )
+
+    assert Version("49.0.0") not in cryptography.specifier
+    production_version = _pinned_version(_locked_requirements("requirements.lock")["cryptography"])
+    development_version = _pinned_version(
+        _locked_requirements("requirements-dev.lock")["cryptography"]
+    )
+    assert production_version >= Version("50.0.2")
+    assert development_version == production_version
+    assert production_version in cryptography.specifier
+
+
+def test_development_dependencies_exclude_known_vulnerable_http_clients():
+    with (ROOT / "pyproject.toml").open("rb") as file:
+        project = tomllib.load(file)
+    constraints = {
+        canonicalize_name(requirement.name): requirement
+        for entry in project["project"]["optional-dependencies"]["dev"]
+        for requirement in [Requirement(entry)]
+    }
+    assert Version("2.7.0") not in constraints["httpx2"].specifier
+    assert "urllib3" in constraints
+    assert Version("2.7.0") not in constraints["urllib3"].specifier
+
+    production = _locked_requirements("requirements.lock")
+    development = _locked_requirements("requirements-dev.lock")
+    for name, minimum in (("httpx2", "2.12.0"), ("httpcore2", "2.10.0"), ("urllib3", "2.8.0")):
+        assert name not in production
+        assert _pinned_version(development[name]) >= Version(minimum)
+
+
 def test_dependency_locks_and_automation_configuration_are_release_ready():
     with (ROOT / "pyproject.toml").open("rb") as file:
         project = tomllib.load(file)
@@ -60,6 +98,7 @@ def test_dependency_locks_and_automation_configuration_are_release_ready():
     assert "ruff check ." in commands
     assert "python -m pytest --cov=app --cov-report=term-missing --cov-fail-under=93" in commands
     assert "pip-audit -r requirements.lock --strict" in commands
+    assert "pip-audit -r requirements-dev.lock --strict" in commands
 
     dependabot = yaml.safe_load((ROOT / ".github/dependabot.yml").read_text(encoding="utf-8"))
     updates = {entry["package-ecosystem"]: entry for entry in dependabot["updates"]}

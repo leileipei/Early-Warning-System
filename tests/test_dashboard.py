@@ -160,6 +160,22 @@ def test_dashboard_context_uses_real_counts_and_recent_rows(session):
     assert context["recent_executions"][0]["rule_name"] == "最新规则"
 
 
+def test_dashboard_includes_partial_mail_failures_in_recent_failure_count(session):
+    now = datetime(2026, 10, 3, 2)
+    source = _create_source(session)
+    rule = _create_rule(session, source, "部分拒收规则")
+    execution = _create_execution(
+        session, rule, started_at=now, status=ExecutionStatus.PARTIAL_FAILED
+    )
+    for sent_at in (now, now - timedelta(hours=24), now - timedelta(hours=25), now + timedelta(seconds=1)):
+        _create_mail(session, execution, status=MailStatus.PARTIAL_FAILED, sent_at=sent_at)
+
+    context = build_dashboard_context(session, now=now)
+
+    assert context["mail_failure_count"] == 2
+    assert context["mail_success_count"] == 0
+
+
 def test_dashboard_recent_window_includes_boundaries_and_excludes_future_records(session):
     now = datetime(2026, 7, 16, 2, 0, 0)
     source = _create_source(session)

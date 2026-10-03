@@ -4,7 +4,8 @@ from dataclasses import dataclass
 
 import pytest
 
-from app.sql_client import PyodbcSqlServerClient, QueryResult, rows_from_cursor
+from app.sql_client import PyodbcSqlServerClient, QueryResult, odbc_sqlstate, rows_from_cursor
+from app.sql_validator import SqlValidationError
 
 
 class FakeCursor:
@@ -221,6 +222,26 @@ def test_validate_syntax_asks_sql_server_to_parse_without_executing(monkeypatch)
     assert cursor.executed_sql == "SET PARSEONLY ON;\nselect id from orders;\nSET PARSEONLY OFF;"
 
 
+@pytest.mark.parametrize("operation", ["query", "validate_syntax"])
+@pytest.mark.parametrize("sql", [
+    "SELECT 1 GRANT SELECT TO public",
+    "SELECT 1 SET PARSEONLY OFF DELETE FROM orders",
+    "SELECT * INTO #copy FROM orders",
+])
+def test_sql_adapter_refuses_unsafe_sql_before_connecting(monkeypatch, operation, sql):
+    fake = FakePyodbc(FakePyodbcConnection(FakePyodbcCursor()))
+    monkeypatch.setitem(sys.modules, "pyodbc", fake)
+    client = PyodbcSqlServerClient("db.internal", 1433, "warnings", "reader", "secret", 5)
+
+    with pytest.raises(SqlValidationError):
+        if operation == "query":
+            client.query(sql, timeout_seconds=7, max_rows=25)
+        else:
+            client.validate_syntax(sql, timeout_seconds=7)
+
+    assert fake.connection_string is None
+
+
 @pytest.mark.parametrize("max_rows", [0, -1, 1.5, "25"])
 def test_query_rejects_invalid_max_rows_before_connecting(monkeypatch, max_rows):
     fake_pyodbc = FakePyodbc(FakePyodbcConnection(FakePyodbcCursor()))
@@ -251,6 +272,13 @@ class MissingDependencyImporter:
                 name=self.missing_name,
             )
         return None
+
+
+def test_sqlstate_extraction_does_not_mask_a_missing_odbc_driver(monkeypatch):
+    monkeypatch.delitem(sys.modules, "pyodbc", raising=False)
+    monkeypatch.setattr(sys, "meta_path", [MissingDependencyImporter("pyodbc")])
+
+    assert odbc_sqlstate(RuntimeError("pyodbc is required")) == ""
 
 
 def test_query_wraps_missing_pyodbc_import_error(monkeypatch):

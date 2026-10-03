@@ -1,5 +1,13 @@
 {% extends "base.html" %}
 
+{% set status_meta = {
+  "success": ("成功", "badge-success"),
+  "running": ("运行中", "badge-warning"),
+  "failed": ("失败", "badge-danger"),
+  "partial_failed": ("部分失败", "badge-danger"),
+} %}
+{% set trigger_meta = {"scheduled": "定时调度", "manual": "手动执行"} %}
+
 {% block content %}
 <section class="page-header">
   <div class="page-heading">
@@ -20,7 +28,7 @@
       <select name="execution_status">
         <option value="">全部</option>
         {% for status in execution_statuses %}
-        <option value="{{ status.value }}"{% if filters.execution_status == status.value %} selected{% endif %}>{{ status.value }}</option>
+        <option value="{{ status.value }}"{% if filters.execution_status == status.value %} selected{% endif %}>{{ status_meta.get(status.value, (status.value, ""))[0] }}</option>
         {% endfor %}
       </select>
     </label>
@@ -29,7 +37,7 @@
       <select name="trigger_type">
         <option value="">全部</option>
         {% for trigger in trigger_types %}
-        <option value="{{ trigger.value }}"{% if filters.trigger_type == trigger.value %} selected{% endif %}>{{ trigger.value }}</option>
+        <option value="{{ trigger.value }}"{% if filters.trigger_type == trigger.value %} selected{% endif %}>{{ trigger_meta.get(trigger.value, trigger.value) }}</option>
         {% endfor %}
       </select>
     </label>
@@ -42,7 +50,7 @@
       <select name="mail_status">
         <option value="">全部</option>
         {% for status in mail_statuses %}
-        <option value="{{ status.value }}"{% if filters.mail_status == status.value %} selected{% endif %}>{{ status.value }}</option>
+        <option value="{{ status.value }}"{% if filters.mail_status == status.value %} selected{% endif %}>{{ status_meta.get(status.value, (status.value, ""))[0] }}</option>
         {% endfor %}
       </select>
     </label>
@@ -78,14 +86,15 @@
       </thead>
       <tbody>
         {% for log in execution_page.items %}
+        {% set status = status_meta.get(log.status.value, ("未知", "badge-muted")) %}
         <tr>
           <td>{{ log.started_at }}</td>
           <td>{{ log.rule_id }}</td>
-          <td>{{ log.trigger_type }}</td>
-          <td><span class="status-text {% if log.status.value == 'success' %}status-success{% elif log.status.value == 'running' %}status-warning{% else %}status-danger{% endif %}">{{ log.status }}</span></td>
+          <td>{{ trigger_meta.get(log.trigger_type.value, log.trigger_type.value) }}</td>
+          <td><span class="badge {{ status[1] }}">{{ status[0] }}</span></td>
           <td>{{ log.row_count }}</td>
           <td>{{ log.email_count }}</td>
-          <td>{{ log.error_message }}</td>
+          <td class="cell-ellipsis" title="{{ log.error_message or '' }}">{{ log.error_message or "" }}</td>
         </tr>
         {% else %}
         <tr>
@@ -99,10 +108,10 @@
     <p>总计 {{ execution_page.total }} 条，第 {{ execution_page.page }}/{{ execution_page.total_pages }} 页</p>
     <div class="pagination-actions">
       {% if execution_page.has_previous %}
-      <a class="button button-secondary" href="{{ log_page_url(execution_page.page - 1, mail_page.page) }}">上一页</a>
+      <a class="button button-secondary button-sm" href="{{ log_page_url(execution_page.page - 1, mail_page.page) }}">上一页</a>
       {% endif %}
       {% if execution_page.has_next %}
-      <a class="button button-secondary" href="{{ log_page_url(execution_page.page + 1, mail_page.page) }}">下一页</a>
+      <a class="button button-secondary button-sm" href="{{ log_page_url(execution_page.page + 1, mail_page.page) }}">下一页</a>
       {% endif %}
     </div>
   </div>
@@ -124,13 +133,14 @@
       </thead>
       <tbody>
         {% for log in mail_page.items %}
+        {% set status = status_meta.get(log.status.value, ("未知", "badge-muted")) %}
         <tr>
           <td>{{ log.sent_at }}</td>
           <td>{{ log.execution_log_id }}</td>
           <td>{{ log.recipients }}</td>
           <td>{{ log.subject }}</td>
-          <td><span class="status-text {% if log.status.value == 'success' %}status-success{% elif log.status.value == 'running' %}status-warning{% else %}status-danger{% endif %}">{{ log.status }}</span></td>
-          <td>{{ log.error_message }}</td>
+          <td><span class="badge {{ status[1] }}">{{ status[0] }}</span></td>
+          <td class="cell-ellipsis" title="{{ log.error_message or '' }}">{{ log.error_message or "" }}</td>
         </tr>
         {% else %}
         <tr>
@@ -144,10 +154,10 @@
     <p>总计 {{ mail_page.total }} 条，第 {{ mail_page.page }}/{{ mail_page.total_pages }} 页</p>
     <div class="pagination-actions">
       {% if mail_page.has_previous %}
-      <a class="button button-secondary" href="{{ log_page_url(execution_page.page, mail_page.page - 1) }}">上一页</a>
+      <a class="button button-secondary button-sm" href="{{ log_page_url(execution_page.page, mail_page.page - 1) }}">上一页</a>
       {% endif %}
       {% if mail_page.has_next %}
-      <a class="button button-secondary" href="{{ log_page_url(execution_page.page, mail_page.page + 1) }}">下一页</a>
+      <a class="button button-secondary button-sm" href="{{ log_page_url(execution_page.page, mail_page.page + 1) }}">下一页</a>
       {% endif %}
     </div>
   </div>
