@@ -87,6 +87,10 @@ def test_dependency_locks_and_automation_configuration_are_release_ready():
     workflow = yaml.safe_load((ROOT / ".github/workflows/ci.yml").read_text(encoding="utf-8"))
     matrix = workflow["jobs"]["test"]["strategy"]["matrix"]
     assert matrix["python-version"] == ["3.11", "3.12", "3.13"]
+    assert any(
+        step.get("uses") == "actions/checkout@v7"
+        for step in workflow["jobs"]["test"]["steps"]
+    )
     setup_python = next(
         step
         for step in workflow["jobs"]["test"]["steps"]
