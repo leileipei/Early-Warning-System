@@ -125,16 +125,138 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   };
 
+  /* ============ 主题切换 ============ */
+  document.querySelectorAll("[data-theme-toggle]").forEach((button) => {
+    button.addEventListener("click", () => {
+      if (window.ewsTheme) {
+        window.ewsTheme.toggle();
+      }
+    });
+  });
+
+  /* ============ 侧边栏（移动端抽屉） ============ */
+  const sidebar = document.querySelector("[data-sidebar]");
+  const backdrop = document.querySelector("[data-sidebar-backdrop]");
+  const setSidebarOpen = (open) => {
+    if (!sidebar) {
+      return;
+    }
+    sidebar.classList.toggle("is-open", open);
+    backdrop?.classList.toggle("is-visible", open);
+    document
+      .querySelectorAll("[data-sidebar-toggle]")
+      .forEach((button) => button.setAttribute("aria-expanded", String(open)));
+  };
+
+  document.querySelectorAll("[data-sidebar-toggle]").forEach((button) => {
+    button.addEventListener("click", () => {
+      setSidebarOpen(!sidebar?.classList.contains("is-open"));
+    });
+  });
+  backdrop?.addEventListener("click", () => setSidebarOpen(false));
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") {
+      setSidebarOpen(false);
+    }
+  });
+
+  /* ============ 规则列表前端过滤 ============ */
+  const ruleFilterInput = document.querySelector("[data-rule-filter]");
+  if (ruleFilterInput) {
+    const ruleRows = Array.from(document.querySelectorAll("[data-rule-row]"));
+    const ruleEmptyRow = document.querySelector("[data-rule-empty]");
+    ruleFilterInput.addEventListener("input", () => {
+      const keyword = ruleFilterInput.value.trim().toLowerCase();
+      let visibleCount = 0;
+      ruleRows.forEach((row) => {
+        const haystack = `${row.dataset.name || ""} ${row.dataset.cron || ""}`.toLowerCase();
+        const matched = !keyword || haystack.includes(keyword);
+        row.hidden = !matched;
+        if (matched) {
+          visibleCount += 1;
+        }
+      });
+      if (ruleEmptyRow) {
+        ruleEmptyRow.hidden = visibleCount !== 0;
+      }
+    });
+  }
+
+  /* ============ 成功提示自动消退 ============ */
+  document.querySelectorAll(".form-success").forEach((notice) => {
+    window.setTimeout(() => {
+      notice.classList.add("is-dismissing");
+      notice.addEventListener("transitionend", () => notice.remove(), { once: true });
+    }, 4500);
+  });
+
+  /* ============ 确认模态框 ============ */
+  const openConfirmModal = (message, onConfirm) => {
+    const overlay = document.createElement("div");
+    overlay.className = "modal-overlay";
+
+    const dialog = document.createElement("div");
+    dialog.className = "modal";
+    dialog.setAttribute("role", "alertdialog");
+    dialog.setAttribute("aria-modal", "true");
+
+    const title = document.createElement("h2");
+    title.textContent = "确认操作";
+
+    const body = document.createElement("p");
+    body.textContent = message;
+
+    const actions = document.createElement("div");
+    actions.className = "modal-actions";
+
+    const cancelButton = document.createElement("button");
+    cancelButton.type = "button";
+    cancelButton.className = "button button-secondary";
+    cancelButton.textContent = "取消";
+
+    const confirmButton = document.createElement("button");
+    confirmButton.type = "button";
+    confirmButton.className = "button button-danger";
+    confirmButton.textContent = "确认";
+
+    const close = () => overlay.remove();
+    cancelButton.addEventListener("click", close);
+    overlay.addEventListener("click", (event) => {
+      if (event.target === overlay) {
+        close();
+      }
+    });
+    document.addEventListener("keydown", function onEscape(event) {
+      if (event.key === "Escape") {
+        close();
+        document.removeEventListener("keydown", onEscape);
+      }
+    });
+    confirmButton.addEventListener("click", () => {
+      close();
+      onConfirm();
+    });
+
+    actions.append(cancelButton, confirmButton);
+    dialog.append(title, body, actions);
+    overlay.appendChild(dialog);
+    document.body.appendChild(overlay);
+    confirmButton.focus();
+  };
+
+  /* ============ 表单提交拦截 ============ */
   document.addEventListener("submit", (event) => {
     const form = event.target;
     if (!(form instanceof HTMLFormElement) || !form.dataset.confirm) {
       return;
     }
-    if (!window.confirm(form.dataset.confirm)) {
-      event.preventDefault();
-    }
+    event.preventDefault();
+    openConfirmModal(form.dataset.confirm, () => {
+      form.submit();
+    });
   });
 
+  /* ============ SQL 检测 / 预览按钮 ============ */
   document.addEventListener("click", async (event) => {
     if (!(event.target instanceof Element)) {
       return;

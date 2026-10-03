@@ -3,7 +3,7 @@
 
 {% block content %}
 <section class="page-header">
-  <div>
+  <div class="page-heading">
     <p class="eyebrow">系统</p>
     <h1>配置</h1>
   </div>
@@ -113,21 +113,21 @@
             <td>{{ data_source.host }}:{{ data_source.port }}</td>
             <td>{{ data_source.database }}</td>
             <td>
-              <span class="status-text {% if data_source.enabled %}status-success{% else %}status-muted{% endif %}">{{ "启用" if data_source.enabled else "停用" }}</span>
+              <span class="badge {% if data_source.enabled %}badge-success{% else %}badge-muted{% endif %}">{{ "启用" if data_source.enabled else "停用" }}</span>
               {% if data_source.trust_server_certificate == "yes" %}
-              <span class="security-warning">证书校验风险</span>
+              <span class="badge badge-warning">证书校验风险</span>
               {% endif %}
             </td>
             <td>
               <div class="table-actions">
                 <form class="inline-form" method="post" action="/settings/sql-server/{{ data_source.id }}/test">
                   {{ csrf_input(csrf_token) }}
-                  <button class="button button-secondary" type="submit">测试连接</button>
+                  <button class="button button-secondary button-sm" type="submit">测试连接</button>
                 </form>
-                <a class="button button-secondary" href="/settings/sql-server/{{ data_source.id }}/edit">编辑</a>
+                <a class="button button-secondary button-sm" href="/settings/sql-server/{{ data_source.id }}/edit">编辑</a>
                 <form class="inline-form" method="post" action="/settings/sql-server/{{ data_source.id }}/delete" data-confirm="确认删除该数据源吗？">
                   {{ csrf_input(csrf_token) }}
-                  <button class="button button-danger" type="submit">删除</button>
+                  <button class="button button-danger button-sm" type="submit">删除</button>
                 </form>
               </div>
             </td>
@@ -210,17 +210,17 @@
             <td>
               {% if smtp_config.use_ssl %}SSL{% elif smtp_config.use_tls %}TLS{% else %}无{% endif %}
             </td>
-            <td><span class="status-text {% if smtp_config.enabled %}status-success{% else %}status-muted{% endif %}">{{ "启用" if smtp_config.enabled else "停用" }}</span></td>
+            <td><span class="badge {% if smtp_config.enabled %}badge-success{% else %}badge-muted{% endif %}">{{ "启用" if smtp_config.enabled else "停用" }}</span></td>
             <td>
               <div class="table-actions">
                 <form class="inline-form" method="post" action="/settings/smtp/{{ smtp_config.id }}/test">
                   {{ csrf_input(csrf_token) }}
-                  <button class="button button-secondary" type="submit">测试发送</button>
+                  <button class="button button-secondary button-sm" type="submit">测试发送</button>
                 </form>
-                <a class="button button-secondary" href="/settings/smtp/{{ smtp_config.id }}/edit">编辑</a>
+                <a class="button button-secondary button-sm" href="/settings/smtp/{{ smtp_config.id }}/edit">编辑</a>
                 <form class="inline-form" method="post" action="/settings/smtp/{{ smtp_config.id }}/delete" data-confirm="确认删除该 SMTP 配置吗？">
                   {{ csrf_input(csrf_token) }}
-                  <button class="button button-danger" type="submit">删除</button>
+                  <button class="button button-danger button-sm" type="submit">删除</button>
                 </form>
               </div>
             </td>
