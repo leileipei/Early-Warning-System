@@ -72,8 +72,14 @@ Python 3.11 使用临时虚拟环境，不替换工作区原有 .venv。
 
 已核对两条流水线 headSha 均对应上述修复提交，各版本任务均完成依赖安装、
 pip check、Ruff、完整 pytest、93% 覆盖率门槛，以及生产和开发锁文件扫描。
-分支 CI 的三个版本覆盖率均为 94.17%；3.11 和 3.12 日志分别为 579 passed。
+分支 CI 的三个版本覆盖率均为 94.17%；三个版本日志均为 579 passed。
 PR 在核对时为 OPEN、MERGEABLE、CLEAN，六项检查全部 SUCCESS；未执行合并。
+
+Python 3.13.15 的该次测试日志为 `579 passed, 230 warnings in 56.97s`，
+包含 SQLite 连接未关闭的 ResourceWarning，不能描述为无警告通过。
+本地代码初查发现公共 engine 及 auth_engine 测试夹具直接返回 Engine，未提供 dispose 收尾，
+这是后续排查线索；尚未通过分配堆栈定位全部警告来源，不据此断言生产连接泄漏。
+后续需完善测试与进程资源生命周期并重跑 Python 3.13，不使用过滤警告掩盖问题。
 
 CI 还有非阻断提示：现有 checkout@v4、setup-python@v5 标注的 Node.js 20
 被 Runner 强制改为 Node.js 24，以及 ubuntu-latest 后续系统镜像迁移提示。
@@ -89,5 +95,6 @@ CI 还有非阻断提示：现有 checkout@v4、setup-python@v5 标注的 Node.j
 3. 在受控 SMTP 环境验证全部接受、部分拒收、完全拒收及实际投递；SMTP 接受不等于邮件送达。
 4. 备份并保持数据库与原 SECRET_KEY 一致，演练升级、备份恢复、Worker 故障及就绪检查。
 5. 审查并合并 PR 后按单 Web、单 Worker、单机 SQLite 边界发布；配置 GitHub 主分支保护。
+6. 排查并消除 Python 3.13 SQLite 资源清理警告，单独验证 CI Actions 运行时更新。
 
 逐收件人明细、仅对失败收件人重发、多主机高可用不属于本批交付范围。
