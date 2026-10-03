@@ -673,6 +673,18 @@ textarea:focus {
   margin-top: -4px;
 }
 
+.cron-presets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  margin-top: -4px;
+}
+
+.cron-presets .section-description {
+  margin: 0;
+}
+
 .field-feedback {
   color: var(--muted);
   font-size: 13.5px;

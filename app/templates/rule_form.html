@@ -67,13 +67,23 @@
       <div class="form-row">
         <label>
           <span>Cron 表达式</span>
-          <input name="cron_expression" value="{{ form.get('cron_expression', '0 9 * * *') }}" required>
+          <input name="cron_expression" value="{{ form.get('cron_expression', '0 9 * * *') }}" data-cron-input required>
         </label>
         <label>
           <span>收件人</span>
           <input name="recipients" value="{{ form.get('recipients', '') }}" placeholder="ops@example.com">
         </label>
       </div>
+      <div class="cron-presets">
+        <span class="section-description">常用预设</span>
+        <button class="button button-secondary button-sm" type="button" data-cron-preset="*/15 * * * *">每 15 分钟</button>
+        <button class="button button-secondary button-sm" type="button" data-cron-preset="0 * * * *">每小时</button>
+        <button class="button button-secondary button-sm" type="button" data-cron-preset="0 9 * * *">每天 09:00</button>
+        <button class="button button-secondary button-sm" type="button" data-cron-preset="0 9 * * 0">每周一 09:00</button>
+        <button class="button button-secondary button-sm" type="button" data-cron-preset="0 9 1 * *">每月 1 日 09:00</button>
+      </div>
+      <p class="section-description">格式：分 时 日 月 周，使用服务器时区 Asia/Shanghai；周从周一开始编号（0=周一，6=周日），可直接点上方预设自动填入。</p>
+      <p class="field-feedback" data-cron-hint role="status" aria-live="polite"></p>
       <label>
         <span>抄送</span>
         <input name="cc_recipients" value="{{ form.get('cc_recipients', '') }}" placeholder="team@example.com">

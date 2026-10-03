@@ -3008,6 +3008,30 @@ def test_settings_tab_switching_script_present():
     assert "sessionStorage" in script
 
 
+def test_rule_form_renders_cron_help(monkeypatch, session):
+    _create_data_source(session)
+    client, get_settings, app = _client_with_admin(monkeypatch, session)
+    try:
+        response = client.get("/rules/new")
+
+        assert response.status_code == 200
+        assert 'name="cron_expression" value="0 9 * * *" data-cron-input required' in response.text
+        assert 'data-cron-hint' in response.text
+        assert 'data-cron-preset="*/15 * * * *"' in response.text
+        assert "0=周一" in response.text
+    finally:
+        app.dependency_overrides.clear()
+        get_settings.cache_clear()
+
+
+def test_cron_helper_script_present():
+    script = Path("app/static/app.js").read_text(encoding="utf-8")
+
+    assert "humanizeCron" in script
+    assert "data-cron-preset" in script
+    assert "CRON_WEEKDAY_NAMES" in script
+
+
 CURRENT_ADMIN_PASSWORD = "current-password-1"
 NEW_ADMIN_PASSWORD = "brand-new-password-9"
 

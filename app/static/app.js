@@ -182,6 +182,124 @@ document.addEventListener("DOMContentLoaded", () => {
     });
   }
 
+  /* ============ Cron 表达式辅助 ============ */
+  const CRON_WEEKDAY_NAMES = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"];
+
+  const parseCronField = (token, minimum, maximum) => {
+    if (token === "*") {
+      return { type: "any" };
+    }
+    const stepMatch = token.match(/^\*\/(\d+)$/);
+    if (stepMatch) {
+      const step = Number(stepMatch[1]);
+      return step >= 1 ? { type: "step", step } : null;
+    }
+    if (/^\d+(,\d+)*$/.test(token)) {
+      const values = token.split(",").map(Number);
+      if (values.some((value) => value < minimum || value > maximum)) {
+        return null;
+      }
+      return { type: "list", values };
+    }
+    return null;
+  };
+
+  const humanizeCron = (expression) => {
+    const tokens = expression.trim().split(/\s+/);
+    if (tokens.length !== 5) {
+      return null;
+    }
+    const minute = parseCronField(tokens[0], 0, 59);
+    const hour = parseCronField(tokens[1], 0, 23);
+    const dayOfMonth = parseCronField(tokens[2], 1, 31);
+    const month = parseCronField(tokens[3], 1, 12);
+    const dayOfWeek = parseCronField(tokens[4], 0, 6);
+    if (!minute || !hour || !dayOfMonth || !month || !dayOfWeek) {
+      return null;
+    }
+    const pad = (value) => String(value).padStart(2, "0");
+    const singleValue = (field) =>
+      field.type === "list" && field.values.length === 1 ? field.values[0] : null;
+
+    if (
+      minute.type === "step" &&
+      hour.type === "any" &&
+      dayOfMonth.type === "any" &&
+      month.type === "any" &&
+      dayOfWeek.type === "any"
+    ) {
+      return `每 ${minute.step} 分钟执行`;
+    }
+
+    const minuteValue = singleValue(minute);
+    if (minuteValue === null) {
+      return null;
+    }
+    const hourValue = singleValue(hour);
+    if (hourValue === null) {
+      const onlyTimeAny =
+        dayOfMonth.type === "any" && month.type === "any" && dayOfWeek.type === "any";
+      if (!onlyTimeAny) {
+        return null;
+      }
+      return minuteValue === 0 ? "每小时执行" : `每小时第 ${minuteValue} 分执行`;
+    }
+
+    const timeText = `${pad(hourValue)}:${pad(minuteValue)}`;
+    if (dayOfWeek.type === "list") {
+      const weekdays = dayOfWeek.values.map((value) => CRON_WEEKDAY_NAMES[value]);
+      return `每${weekdays.join("、")} ${timeText} 执行`;
+    }
+    if (dayOfMonth.type === "list") {
+      const days = dayOfMonth.values.map((value) => `${value} 日`);
+      if (month.type === "list") {
+        const months = month.values.map((value) => `${value} 月`);
+        return `每年 ${months.join("、")} ${days.join("、")} ${timeText} 执行`;
+      }
+      return `每月 ${days.join("、")} ${timeText} 执行`;
+    }
+    if (month.type === "list") {
+      const months = month.values.map((value) => `${value} 月`);
+      return `每年 ${months.join("、")} ${timeText} 执行`;
+    }
+    return `每天 ${timeText} 执行`;
+  };
+
+  const cronInput = document.querySelector("[data-cron-input]");
+  const cronHint = document.querySelector("[data-cron-hint]");
+  const updateCronHint = () => {
+    if (!cronInput || !cronHint) {
+      return;
+    }
+    const value = cronInput.value.trim();
+    if (!value) {
+      cronHint.textContent = "";
+      cronHint.classList.remove("is-error");
+      return;
+    }
+    const description = humanizeCron(value);
+    if (description) {
+      cronHint.textContent = description;
+      cronHint.classList.remove("is-error");
+    } else {
+      cronHint.textContent = "无法解析该表达式，请检查格式（分 时 日 月 周），保存时将再次校验";
+      cronHint.classList.add("is-error");
+    }
+  };
+  if (cronInput) {
+    cronInput.addEventListener("input", updateCronHint);
+    updateCronHint();
+  }
+  document.querySelectorAll("[data-cron-preset]").forEach((button) => {
+    button.addEventListener("click", () => {
+      if (!cronInput) {
+        return;
+      }
+      cronInput.value = button.dataset.cronPreset;
+      cronInput.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+  });
+
   /* ============ 配置页页签 ============ */
   const settingsTabButtons = document.querySelectorAll("[data-settings-tab]");
   if (settingsTabButtons.length) {
