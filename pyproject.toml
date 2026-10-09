@@ -23,7 +23,7 @@ dev = [
   "pytest>=9.1.1",
   "pytest-cov>=7.1.0",
   "ruff>=0.5",
-  "pip-audit>=2.7",
+  "pip-audit>=2.10.1",
   "pip-tools>=7.4",
   # Keep pip-audit's HTTP transport above its security fix floor.
   "urllib3>=2.8.0",
