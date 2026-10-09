@@ -14,7 +14,7 @@ dependencies = [
   "python-multipart>=0.0.32",
   "sqlglot==30.21.0",
   "sqlmodel>=0.0.22",
-  "uvicorn[standard]>=0.29",
+  "uvicorn[standard]>=0.54.0",
 ]
 
 [project.optional-dependencies]
